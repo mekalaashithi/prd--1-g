@@ -1,0 +1,6 @@
+{
+  "name": "CommunityHub",
+  "description": "A portfolio-worthy community directory and management platform featuring location-based discovery, events, notifications, and granular dashboards for Members, Community Admins, and Super Admins.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
