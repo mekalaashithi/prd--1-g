@@ -24,12 +24,65 @@ export const CommunityDetail: React.FC<CommunityDetailProps> = ({
   const [success, setSuccess] = useState('');
   const [joinRequests, setJoinRequests] = useState<any[]>([]);
 
+  // Volunteer handling states
+  const [applyingEventId, setApplyingEventId] = useState<string | null>(null);
+  const [motivation, setMotivation] = useState('');
+  const [skills, setSkills] = useState('');
+  const [experience, setExperience] = useState('');
+  const [volunteers, setVolunteers] = useState<any[]>([]);
+
   useEffect(() => {
     loadDetails();
     if (user) {
       loadJoinRequests();
+      loadMyVolunteers();
     }
   }, [communityId, user]);
+
+  const loadMyVolunteers = async () => {
+    if (!user) return;
+    try {
+      const resp = await api.getMyVolunteers();
+      setVolunteers(resp.volunteers || []);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleWithdrawVolunteer = async (eventId: string) => {
+    if (!window.confirm('Are you sure you want to withdraw your volunteer request?')) return;
+    setError('');
+    setSuccess('');
+    try {
+      await api.withdrawVolunteerRequest(eventId);
+      setSuccess('Volunteer request withdrawn successfully!');
+      await loadMyVolunteers();
+    } catch (e: any) {
+      setError(e.message || 'Failed to withdraw volunteer request.');
+    }
+  };
+
+  const handleSubmitVolunteerRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!motivation.trim() || !skills.trim()) {
+      setError('Please provide why you want to volunteer and your skills contribution.');
+      return;
+    }
+    setError('');
+    setSuccess('');
+    try {
+      await api.applyAsVolunteer(applyingEventId!, {
+        motivation,
+        skills,
+        experience,
+      });
+      setSuccess('Volunteer request submitted successfully!');
+      setApplyingEventId(null);
+      await loadMyVolunteers();
+    } catch (e: any) {
+      setError(e.message || 'Failed to submit volunteer request.');
+    }
+  };
 
   const loadDetails = async () => {
     setLoading(true);
@@ -72,19 +125,41 @@ export const CommunityDetail: React.FC<CommunityDetailProps> = ({
     }
   };
 
+  const [confirmingLeave, setConfirmingLeave] = useState(false);
+
   const handleLeave = async () => {
-    if (window.confirm('Are you positive you want to depart this community? Your membership access will cease immediately.')) {
-      setError('');
-      setSuccess('');
-      try {
-        const resp = await api.leaveCommunity(communityId);
-        setSuccess(resp.message || 'Left community.');
-        loadDetails();
-        loadJoinRequests();
-        onRefreshList();
-      } catch (e: any) {
-        setError(e.message);
-      }
+    setConfirmingLeave(true);
+  };
+
+  const confirmLeaveAction = async () => {
+    setError('');
+    setSuccess('');
+    try {
+      const resp = await api.leaveCommunity(communityId);
+      setSuccess(resp.message || 'Successfully departed the community.');
+      setConfirmingLeave(false);
+      loadDetails();
+      loadJoinRequests();
+      onRefreshList();
+    } catch (e: any) {
+      setError(e.message || 'Failed to leave community.');
+      setConfirmingLeave(false);
+    }
+  };
+
+  const handleWithdraw = async () => {
+    const pendingReqObj = user && joinRequests.find((r) => r.communityId === communityId && (r.status === 'pending' || r.status === 'Pending'));
+    if (!pendingReqObj) return;
+    setError('');
+    setSuccess('');
+    try {
+      const resp = await api.withdrawJoinRequest(pendingReqObj.id);
+      setSuccess(resp.message || 'Successfully withdrew your join request.');
+      loadDetails();
+      loadJoinRequests();
+      onRefreshList();
+    } catch (e: any) {
+      setError(e.message || 'Failed to withdraw join request.');
     }
   };
 
@@ -132,8 +207,8 @@ export const CommunityDetail: React.FC<CommunityDetailProps> = ({
 
   const { community, events, announcements } = data;
   const isMember = user && community.members.includes(user.id);
-  const pendingReq = user && joinRequests.find((r) => r.communityId === communityId && r.status === 'pending');
-  const rejectedReq = user && joinRequests.find((r) => r.communityId === communityId && r.status === 'rejected');
+  const pendingReq = user && joinRequests.find((r) => r.communityId === communityId && (r.status === 'pending' || r.status === 'Pending'));
+  const rejectedReq = user && joinRequests.find((r) => r.communityId === communityId && (r.status === 'rejected' || r.status === 'Rejected'));
 
   let joinStatusText = '';
   if (isMember) joinStatusText = 'Approved Member';
@@ -212,23 +287,49 @@ export const CommunityDetail: React.FC<CommunityDetailProps> = ({
           {/* Action buttons */}
           <div className="flex items-center space-x-2.5">
             {isMember ? (
+              confirmingLeave ? (
+                <div className="flex items-center space-x-2 bg-rose-50 border border-rose-200 p-2 rounded-xl text-xs">
+                  <span className="font-semibold text-rose-850">Really Leave?</span>
+                  <button
+                    onClick={confirmLeaveAction}
+                    className="px-2.5 py-1 bg-rose-600 text-white font-bold rounded-lg text-[10px] cursor-pointer hover:bg-rose-700 transition-colors"
+                  >
+                    Yes, Leave
+                  </button>
+                  <button
+                    onClick={() => setConfirmingLeave(false)}
+                    className="px-2.5 py-1 bg-slate-200 text-slate-700 font-bold rounded-lg text-[10px] cursor-pointer hover:bg-slate-300 transition-colors"
+                  >
+                    No
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center space-x-2">
+                  <span className="flex items-center space-x-1 text-xs font-semibold text-emerald-600 bg-emerald-50 px-3 py-2 rounded-xl border border-emerald-100">
+                    <Check className="w-4 h-4" />
+                    <span>Approved Joined Member</span>
+                  </span>
+                  <button
+                    onClick={handleLeave}
+                    className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 hover:text-rose-700 border border-rose-100 text-xs font-semibold rounded-xl transition-all cursor-pointer"
+                  >
+                    Leave
+                  </button>
+                </div>
+              )
+            ) : pendingReq ? (
               <div className="flex items-center space-x-2">
-                <span className="flex items-center space-x-1 text-xs font-semibold text-emerald-600 bg-emerald-50 px-3 py-2 rounded-xl border border-emerald-100">
-                  <Check className="w-4 h-4" />
-                  <span>Approved Joined Member</span>
+                <span className="flex items-center space-x-1.5 text-xs font-semibold text-amber-600 bg-amber-50 px-4 py-2.5 rounded-xl border border-amber-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                  <span>Request Sent: Approval Pending</span>
                 </span>
                 <button
-                  onClick={handleLeave}
+                  onClick={handleWithdraw}
                   className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 hover:text-rose-700 border border-rose-100 text-xs font-semibold rounded-xl transition-all cursor-pointer"
                 >
-                  Leave
+                  Withdraw
                 </button>
               </div>
-            ) : pendingReq ? (
-              <span className="flex items-center space-x-1.5 text-xs font-semibold text-amber-600 bg-amber-50 px-4 py-2.5 rounded-xl border border-amber-200">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                <span>Request Sent: Approval Pending</span>
-              </span>
             ) : (
               <button
                 onClick={handleJoin}
@@ -430,8 +531,73 @@ export const CommunityDetail: React.FC<CommunityDetailProps> = ({
                             <Users className="w-3.5 h-3.5 mr-2 text-slate-400" />
                             <span>{evt.attendees.length} attending this meetup</span>
                           </div>
+                          {/* Event Volunteers List */}
+                          {evt.volunteers && evt.volunteers.length > 0 && (
+                            <div className="flex items-start pt-2">
+                              <Heart className="w-3.5 h-3.5 mr-2 mt-0.5 text-rose-500 fill-rose-500 shrink-0" />
+                              <div className="text-[11px] text-slate-600">
+                                <strong className="font-semibold text-slate-700">Volunteers:</strong>{' '}
+                                {evt.volunteers.map((v: any) => v.userName).join(', ')}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
+
+                      {/* Volunteer Request & Status System */}
+                      {isMember && (() => {
+                        const volunteerRequest = volunteers.find(v => v.eventId === evt.id);
+                        return (
+                          <div className="px-5 py-2.5 bg-rose-50/10 border-t border-slate-100 flex items-center justify-between text-xs">
+                            {volunteerRequest ? (
+                              <>
+                                <div className="flex items-center space-x-1.5 font-sans">
+                                  <span className="font-bold text-slate-500">Volunteer Status:</span>
+                                  {volunteerRequest.status === 'Pending' && (
+                                    <span className="bg-amber-100 text-amber-805 px-2 py-0.5 rounded-full text-[10px] font-black uppercase">
+                                      Pending
+                                    </span>
+                                  )}
+                                  {volunteerRequest.status === 'Approved' && (
+                                    <span className="bg-emerald-100 text-emerald-805 px-2 py-0.5 rounded-full text-[10px] font-black uppercase flex items-center gap-0.5">
+                                      <Check className="w-3 h-3" /> Approved
+                                    </span>
+                                  )}
+                                  {volunteerRequest.status === 'Rejected' && (
+                                    <span className="bg-rose-100 text-rose-850 px-2 py-0.5 rounded-full text-[10px] font-black uppercase">
+                                      Declined
+                                    </span>
+                                  )}
+                                </div>
+
+                                {volunteerRequest.status === 'Pending' && (
+                                  <button
+                                    onClick={() => handleWithdrawVolunteer(evt.id)}
+                                    className="text-[10px] text-rose-600 hover:text-rose-850 font-black underline cursor-pointer"
+                                  >
+                                    Withdraw Volunteer Request
+                                  </button>
+                                )}
+                              </>
+                            ) : (
+                              <>
+                                <span className="text-slate-450 text-[11px] font-medium">Contribute to this event</span>
+                                <button
+                                  onClick={() => {
+                                    setApplyingEventId(evt.id);
+                                    setMotivation('');
+                                    setSkills('');
+                                    setExperience('');
+                                  }}
+                                  className="px-2.5 py-1 text-[11px] font-bold text-rose-600 hover:bg-rose-50 border border-rose-200 rounded-lg transition-all cursor-pointer flex items-center space-x-1"
+                                >
+                                  <span>Apply as Volunteer</span>
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {/* Event RSVP Controls */}
                       <div className="bg-slate-50 px-5 py-3 border-t border-slate-100 flex items-center justify-between">
@@ -505,6 +671,85 @@ export const CommunityDetail: React.FC<CommunityDetailProps> = ({
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Volunteer Application Form modal */}
+        {applyingEventId && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs select-none">
+            <div className="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-md w-full overflow-hidden p-6 space-y-4 text-left">
+              <div className="flex items-center justify-between border-b pb-3">
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <Heart className="w-4 h-4 text-rose-500 fill-rose-500" />
+                  <span>Apply as Volunteer</span>
+                </h3>
+                <button
+                  onClick={() => setApplyingEventId(null)}
+                  className="text-slate-400 hover:text-slate-600 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSubmitVolunteerRequest} className="space-y-4 font-sans">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">
+                    Why do you want to volunteer? <span className="text-rose-500">*</span>
+                  </label>
+                  <textarea
+                    required
+                    rows={3}
+                    value={motivation}
+                    onChange={(e) => setMotivation(e.target.value)}
+                    placeholder="Describe your motivation..."
+                    className="w-full text-xs p-3 border border-slate-200 rounded-xl focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">
+                    What skills can you contribute? <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    required
+                    type="text"
+                    value={skills}
+                    onChange={(e) => setSkills(e.target.value)}
+                    placeholder="e.g. Graphic design, photography, teaching..."
+                    className="w-full text-xs p-3 border border-slate-200 rounded-xl focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">
+                    Previous volunteering experience <span className="text-slate-400 font-normal">(optional)</span>
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={experience}
+                    onChange={(e) => setExperience(e.target.value)}
+                    placeholder="Describe any past roles (internal or external)..."
+                    className="w-full text-xs p-3 border border-slate-200 rounded-xl focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+
+                <div className="flex space-x-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setApplyingEventId(null)}
+                    className="flex-grow py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-grow py-2 bg-rose-650 hover:bg-rose-700 text-white font-bold text-xs rounded-xl transition-all cursor-pointer"
+                  >
+                    Submit Volunteer Request
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         )}
 

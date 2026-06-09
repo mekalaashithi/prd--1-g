@@ -106,6 +106,44 @@ export const api = {
     });
   },
 
+  async withdrawJoinRequest(requestId: string) {
+    return request<{ message: string }>(`/join-requests/${requestId}/withdraw`, {
+      method: 'POST',
+    });
+  },
+
+  async applyAsVolunteer(eventId: string, payload: { motivation: string; skills: string; experience?: string }) {
+    return request<{ message: string; volunteer: any }>(`/events/${eventId}/volunteer`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async withdrawVolunteerRequest(eventId: string) {
+    return request<{ message: string }>(`/events/${eventId}/volunteer`, {
+      method: 'DELETE',
+    });
+  },
+
+  async getMyVolunteers() {
+    return request<{ volunteers: any[] }>('/volunteers/my');
+  },
+
+  async getAdminVolunteers(communityId: string) {
+    return request<{ volunteers: any[] }>(`/admin/communities/${communityId}/volunteers`);
+  },
+
+  async updateVolunteerStatus(volunteerId: string, status: 'Approved' | 'Rejected') {
+    return request<{ message: string; volunteer: any }>(`/admin/volunteers/${volunteerId}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
+    });
+  },
+
+  async getUserProfile(userId: string) {
+    return request<{ profile: any }>(`/users/${userId}/profile`);
+  },
+
   async getJoinRequests() {
     return request<{ requests: any[] }>('/join-requests');
   },
@@ -113,6 +151,18 @@ export const api = {
   // Events & RSVPs
   async getEvents(all = false) {
     return request<{ events: any[] }>(`/events?all=${all}`);
+  },
+
+  async getPublicEvents(filters?: { lat?: number; lon?: number; radius?: number }) {
+    let query = '';
+    if (filters) {
+      const parts: string[] = [];
+      if (filters.lat !== undefined) parts.push(`lat=${filters.lat}`);
+      if (filters.lon !== undefined) parts.push(`lon=${filters.lon}`);
+      if (filters.radius !== undefined) parts.push(`radius=${filters.radius}`);
+      if (parts.length > 0) query = '?' + parts.join('&');
+    }
+    return request<{ events: any[] }>(`/events/public${query}`);
   },
 
   async rsvpEvent(eventId: string) {
@@ -263,6 +313,22 @@ export const api = {
 
   async getCommunityAnalytics(communityId: string) {
     return request<{ analytics: any }>(`/admin/communities/${communityId}/analytics`);
+  },
+
+  // Gamification & Attendance
+  async getLeaderboard(range = 'All-Time') {
+    return request<{ leaderboard: any[] }>(`/leaderboard?range=${range}`);
+  },
+
+  async getRecognition() {
+    return request<{ recognition: any }>('/recognition');
+  },
+
+  async submitAttendance(eventId: string, attendance: Array<{ userId: string; status: 'Present' | 'Absent'; contributionType?: string }>) {
+    return request<{ message: string }>(`/admin/events/${eventId}/attendance`, {
+      method: 'POST',
+      body: JSON.stringify({ attendance }),
+    });
   },
 
   // Super Admin Endpoints

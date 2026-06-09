@@ -5,6 +5,7 @@ import { VisitorPortal } from './components/VisitorPortal';
 import { CommunityDetail } from './components/CommunityDetail';
 import { MemberDashboard } from './components/MemberDashboard';
 import { AdminDashboard } from './components/AdminDashboard';
+import { PublicProfileModal } from './components/PublicProfileModal';
 import { api } from './lib/api';
 import { 
   Compass, 
@@ -35,6 +36,31 @@ export default function App() {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authModalTab, setAuthModalTab] = useState<'login' | 'register'>('login');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  // Clickable public profiles
+  const [profileModalUserId, setProfileModalUserId] = useState<string | null>(null);
+  const [profileModalUser, setProfileModalUser] = useState<any | null>(null);
+  const [profileModalLoading, setProfileModalLoading] = useState(false);
+
+  useEffect(() => {
+    if (profileModalUserId) {
+      loadProfileModalUser(profileModalUserId);
+    } else {
+      setProfileModalUser(null);
+    }
+  }, [profileModalUserId]);
+
+  const loadProfileModalUser = async (id: string) => {
+    setProfileModalLoading(true);
+    try {
+      const resp = await api.getUserProfile(id);
+      setProfileModalUser(resp.profile);
+    } catch (e) {
+      console.error('Failed to load profile details client-side', e);
+    } finally {
+      setProfileModalLoading(false);
+    }
+  };
 
   // Inline Log In / Register Form States for full screen login gate
   const [isRegisterMode, setIsRegisterMode] = useState(false);
@@ -121,10 +147,10 @@ export default function App() {
       password: inlinePassword,
       role: inlineRole,
       location: {
-        latitude: 37.7749,
-        longitude: -122.4194,
-        city: 'San Francisco',
-        state: 'California'
+        latitude: 17.3850,
+        longitude: 78.4867,
+        city: 'Hyderabad',
+        state: 'Telangana'
       },
       interests: ['TS/JS Coding', 'AI/ML Agents', 'Startup Pitching']
     };
@@ -645,6 +671,7 @@ export default function App() {
             onBack={() => handleSelectCommunity(null)}
             onTriggerAuth={() => handleTriggerAuth('login')}
             onRefreshList={() => setRefreshTrigger((prev) => prev + 1)}
+            onViewProfile={(id) => setProfileModalUserId(id)}
           />
         ) : (
           /* TAB DASHBOARD SCREEN VIEWS & SELECTOR GATEWAYS */
@@ -827,6 +854,7 @@ export default function App() {
                 user={user}
                 onRefreshUser={syncUserSession}
                 onSelectCommunity={handleSelectCommunity}
+                onViewProfile={(id) => setProfileModalUserId(id)}
               />
             )}
 
@@ -835,6 +863,7 @@ export default function App() {
                 user={user}
                 onRefreshUser={syncUserSession}
                 onSelectCommunity={handleSelectCommunity}
+                onViewProfile={(id) => setProfileModalUserId(id)}
               />
             )}
           </>
@@ -861,6 +890,15 @@ export default function App() {
         onClose={() => setAuthModalOpen(false)}
         initialTab={authModalTab}
         onLoginSuccess={handleLoginSuccess}
+      />
+
+      {/* 👥 PUBLIC PROFILE VIEWER MODAL */}
+      <PublicProfileModal
+        isOpen={!!profileModalUserId}
+        onClose={() => setProfileModalUserId(null)}
+        userId={profileModalUserId}
+        profile={profileModalUser}
+        loading={profileModalLoading}
       />
 
     </div>

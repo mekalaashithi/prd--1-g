@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Users, Calendar, Megaphone, Settings, TrendingUp, Check, X, ShieldAlert, Award, Star, Trash2, ArrowRight, ToggleLeft, Edit, PlusCircle, Bookmark, Eye, Layers, Clock } from 'lucide-react';
+import { Plus, Users, Calendar, Megaphone, Settings, TrendingUp, Check, X, ShieldAlert, Award, Star, Trash2, ArrowRight, ToggleLeft, Edit, PlusCircle, Bookmark, Eye, Layers, Clock, CheckSquare, Heart } from 'lucide-react';
 import { api } from '../lib/api';
 import { LineChart, BarChart } from './Charts';
 
@@ -7,17 +7,19 @@ interface AdminDashboardProps {
   user: any;
   onRefreshUser: () => void;
   onSelectCommunity: (id: string) => void;
+  onViewProfile: (userId: string) => void;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   user,
   onRefreshUser,
   onSelectCommunity,
+  onViewProfile,
 }) => {
   // Admin-managed communities list
   const [managedComms, setManagedComms] = useState<any[]>([]);
   const [selectedCommId, setSelectedCommId] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'analytics' | 'requests' | 'members' | 'events' | 'announcements' | 'settings'>('analytics');
+  const [activeTab, setActiveTab] = useState<'analytics' | 'requests' | 'members' | 'events' | 'announcements' | 'settings' | 'volunteers'>('analytics');
 
   // Sub-data inside community
   const [analytics, setAnalytics] = useState<any>(null);
@@ -26,9 +28,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [members, setMembers] = useState<any[]>([]);
   const [events, setEvents] = useState<any[]>([]);
   const [announcements, setAnnouncements] = useState<any[]>([]);
+  const [volunteers, setVolunteers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [resolvingRequestId, setResolvingRequestId] = useState<string | null>(null);
   const [memberSearchQuery, setMemberSearchQuery] = useState('');
+  const [reqFilter, setReqFilter] = useState<'Pending' | 'Approved' | 'Rejected'>('Pending');
 
   // Helper to render role badges
   const renderRoleBadge = (role: string, roleId?: string) => {
@@ -71,7 +75,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [evtDesc, setEvtDesc] = useState('');
   const [evtDate, setEvtDate] = useState('');
   const [evtLoc, setEvtLoc] = useState('');
+  const [evtType, setEvtType] = useState('Meetup');
+  const [evtMaxParticipants, setEvtMaxParticipants] = useState('50');
   const [editingEvtId, setEditingEvtId] = useState<string | null>(null);
+
+  // Core Attendance State Tracker
+  const [activeAttendanceEventId, setActiveAttendanceEventId] = useState<string | null>(null);
+  const [attendanceSheet, setAttendanceSheet] = useState<Array<{
+    userId: string;
+    name: string;
+    email: string;
+    profileImage: string;
+    status: 'Present' | 'Absent';
+    contributionType: 'Attendance' | 'Volunteer' | 'Contribution' | 'Organizer';
+  }>>([]);
 
   // Announcement form states
   const [annTitle, setAnnTitle] = useState('');
@@ -116,11 +133,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setSuccessMsg('');
     setErrorMsg('');
     try {
-      const [analResp, reqResp, memResp, detailsResp] = await Promise.all([
+      const [analResp, reqResp, memResp, detailsResp, volsResp] = await Promise.all([
         api.getCommunityAnalytics(selectedCommId),
         api.getAdminRequests(selectedCommId),
         api.getAdminMembers(selectedCommId),
-        api.getCommunity(selectedCommId)
+        api.getCommunity(selectedCommId),
+        api.getAdminVolunteers(selectedCommId).catch(() => ({ volunteers: [] }))
       ]);
 
       setAnalytics(analResp.analytics);
@@ -130,6 +148,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setMembers(memResp.members);
       setEvents(detailsResp.events);
       setAnnouncements(detailsResp.announcements);
+      setVolunteers(volsResp?.volunteers || []);
 
       // Populate settings form with current state
       const currentComm = detailsResp.community;
@@ -148,6 +167,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setErrorMsg('Error pulling administrative indices for the selected community.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Resolve Volunteer status (Approve/Reject)
+  const handleResolveVolunteer = async (volunteerId: string, status: 'Approved' | 'Rejected') => {
+    setSuccessMsg('');
+    setErrorMsg('');
+    try {
+      const resp = await api.updateVolunteerStatus(volunteerId, status);
+      setSuccessMsg(resp.message || `Successfully registered volunteer status as ${status}!`);
+      await loadCommunityWorkspaceData();
+    } catch (e: any) {
+      setErrorMsg(e.message || 'Could not update volunteer request status');
     }
   };
 
@@ -281,7 +313,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       title: evtTitle,
       description: evtDesc,
       eventDate: new Date(evtDate).toISOString(),
-      location: evtLoc
+      location: evtLoc,
+      eventType: evtType,
+      maxParticipants: parseInt(evtMaxParticipants) || 50
     };
 
     try {
@@ -298,6 +332,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setEvtDesc('');
       setEvtDate('');
       setEvtLoc('');
+      setEvtType('Meetup');
+      setEvtMaxParticipants('50');
       setEditingEvtId(null);
       loadCommunityWorkspaceData();
     } catch (e: any) {
@@ -322,6 +358,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setEvtTitle(evt.title);
     setEvtDesc(evt.description);
     setEvtLoc(evt.location);
+    setEvtType(evt.eventType || 'Meetup');
+    setEvtMaxParticipants(String(evt.maxParticipants || 50));
     // Format ISO string to browser datetime value
     const dateFormatted = evt.eventDate.substring(0, 16);
     setEvtDate(dateFormatted);
@@ -474,6 +512,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   { key: 'analytics', label: 'Analytics Dashboard', icon: TrendingUp },
                   { key: 'requests', label: `Pending Approvals (${pendingRequests.length})`, icon: Clock, counts: pendingRequests.length },
                   { key: 'members', label: `Authorize Members (${members.length})`, icon: Users },
+                  { key: 'volunteers', label: `Volunteer Requests (${volunteers.filter(v => v.status === 'Pending').length})`, icon: Heart, counts: volunteers.filter(v => v.status === 'Pending').length },
                   { key: 'events', label: `Events Board (${events.length})`, icon: Calendar },
                   { key: 'announcements', label: `Notice Bulletins (${announcements.length})`, icon: Megaphone },
                   { key: 'settings', label: 'Branding & Meta Settings', icon: Settings },
@@ -580,109 +619,151 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             )}
 
-            {/* 2. PENDING REQUESTS CONSOLE */}
+            {/* 2. REQUESTS CONSOLE WITH TABS: PENDING, APPROVED, REJECTED */}
             {activeTab === 'requests' && (
               <div className="space-y-4">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                   <div>
-                    <h3 className="text-base font-bold text-slate-905">Review Access Requests</h3>
-                    <p className="text-xs text-slate-500">Authorize or deny entry to pending platform profiles.</p>
+                    <h3 className="text-base font-bold text-slate-905">Membership Request Flow</h3>
+                    <p className="text-xs text-slate-500">Track, approve, reject and view applicant details for your community.</p>
                   </div>
-                  <span className="bg-amber-50 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-amber-200">
-                    {pendingRequests.length} Requests Pending
-                  </span>
+                  
+                  {/* Status Switcher Tabs */}
+                  <div className="flex bg-slate-100 p-1 rounded-xl self-start sm:self-auto">
+                    {(['Pending', 'Approved', 'Rejected'] as const).map((status) => {
+                      const count = allRequests.filter(r => (r.status || '').toLowerCase() === status.toLowerCase()).length;
+                      const active = reqFilter === status;
+                      return (
+                        <button
+                          key={status}
+                          onClick={() => setReqFilter(status)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                            active 
+                              ? 'bg-white text-indigo-700 shadow-sm' 
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          {status} ({count})
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
-                {pendingRequests.length === 0 ? (
-                  <div className="bg-white rounded-2xl p-12 border text-center shadow-sm text-xs">
-                    <Check className="w-10 h-10 text-emerald-500 bg-emerald-50 p-2.5 rounded-full mx-auto mb-2" />
-                    <p className="font-bold text-slate-800">You are all caught up!</p>
-                    <p className="text-slate-400 mt-1">There are no pending join requests active for this community.</p>
-                  </div>
-                ) : (
-                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse text-xs">
-                        <thead>
-                          <tr className="bg-slate-50/75 border-b border-slate-200 text-slate-400 font-extrabold text-[10px] uppercase tracking-wider">
-                            <th className="py-3 px-4">Role ID</th>
-                            <th className="py-3 px-4">Applicant</th>
-                            <th className="py-3 px-4">Email</th>
-                            <th className="py-3 px-4">Target Community</th>
-                            <th className="py-3 px-4">Request Date</th>
-                            <th className="py-3 px-4">Status</th>
-                            <th className="py-3 px-4 text-center">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 font-sans">
-                          {pendingRequests.map((req) => {
-                            const matchingComm = managedComms.find(c => c.id === req.communityId);
-                            const targetCommName = req.communityName || matchingComm?.name || commName;
-                            const isResolvingThis = resolvingRequestId === req.id;
-                            const isResolvingAny = resolvingRequestId !== null;
+                {(() => {
+                  const filteredRequests = allRequests.filter(
+                    r => (r.status || '').toLowerCase() === reqFilter.toLowerCase()
+                  );
 
-                            return (
-                              <tr key={req.id} className="hover:bg-slate-50/50 transition-colors">
-                                <td className="py-3.5 px-4">
-                                  {renderRoleBadge('Visitor', req.roleId || 'V001')}
-                                </td>
-                                <td className="py-3.5 px-4 font-extrabold text-slate-800">
-                                  {req.userName}
-                                </td>
-                                <td className="py-3.5 px-4 text-slate-500">
-                                  {req.userEmail}
-                                </td>
-                                <td className="py-3.5 px-4 font-semibold text-slate-700">
-                                  {targetCommName}
-                                </td>
-                                <td className="py-3.5 px-4 text-slate-500 font-medium">
-                                  {new Date(req.requestedAt || req.createdAt || new Date()).toLocaleDateString()}
-                                </td>
-                                <td className="py-3.5 px-4">
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-amber-100 text-amber-800">
-                                    Pending
-                                  </span>
-                                </td>
-                                <td className="py-3.5 px-4 text-center">
-                                  <div className="flex items-center justify-center space-x-1.5">
-                                    <button
-                                      disabled={isResolvingAny}
-                                      onClick={() => handleResolveRequest(req.id, 'approved')}
-                                      className={`px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-lg text-[10px] flex items-center space-x-1 cursor-pointer transition-all ${
-                                        isResolvingAny ? 'opacity-65 cursor-not-allowed' : ''
-                                      }`}
+                  if (filteredRequests.length === 0) {
+                    return (
+                      <div className="bg-white rounded-2xl p-12 border text-center shadow-sm text-xs">
+                        <Check className="w-10 h-10 text-slate-400 bg-slate-50 p-2.5 rounded-full mx-auto mb-2" />
+                        <p className="font-bold text-slate-800">No requests here</p>
+                        <p className="text-slate-400 mt-1">There are no {reqFilter.toLowerCase()} requests active for this community.</p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse text-xs">
+                          <thead>
+                            <tr className="bg-slate-50/75 border-b border-slate-200 text-slate-400 font-extrabold text-[10px] uppercase tracking-wider">
+                              <th className="py-3 px-4">Role ID</th>
+                              <th className="py-3 px-4">Applicant</th>
+                              <th className="py-3 px-4">Email</th>
+                              <th className="py-3 px-4">Target Community</th>
+                              <th className="py-3 px-4">Request Date</th>
+                              <th className="py-3 px-4 animate-pulse">Status</th>
+                              {reqFilter === 'Pending' && <th className="py-3 px-4 text-center">Actions</th>}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 font-sans">
+                            {filteredRequests.map((req) => {
+                              const matchingComm = managedComms.find(c => c.id === req.communityId);
+                              const targetCommName = req.communityName || matchingComm?.name || commName;
+                              const isResolvingThis = resolvingRequestId === req.id;
+                              const isResolvingAny = resolvingRequestId !== null;
+
+                              return (
+                                <tr key={req.id} className="hover:bg-slate-50/50 transition-colors">
+                                  <td className="py-3.5 px-4">
+                                    {renderRoleBadge('Visitor', req.roleId || 'V001')}
+                                  </td>
+                                  <td className="py-3.5 px-4">
+                                    <button 
+                                      onClick={() => onViewProfile && onViewProfile(req.userId)}
+                                      className="font-extrabold text-indigo-650 hover:text-indigo-800 hover:underline transition-all font-sans cursor-pointer text-left focus:outline-none"
+                                      title="Click to view applicant details & full profile credentials"
                                     >
-                                      {isResolvingThis ? (
-                                        <>
-                                          <span className="animate-spin border-t-2 border-r-2 border-white rounded-full w-3 h-3 block"></span>
-                                          <span>Approving...</span>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <Check className="w-3 h-3" />
-                                          <span>Approve</span>
-                                        </>
-                                      )}
+                                      {req.userName}
                                     </button>
-                                    <button
-                                      disabled={isResolvingAny}
-                                      onClick={() => handleResolveRequest(req.id, 'rejected')}
-                                      className={`px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-lg text-[10px] cursor-pointer transition-all border border-rose-100 ${
-                                        isResolvingAny ? 'opacity-65 cursor-not-allowed' : ''
-                                      }`}
-                                    >
-                                      Reject
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                                  </td>
+                                  <td className="py-3.5 px-4 text-slate-500">
+                                    {req.userEmail}
+                                  </td>
+                                  <td className="py-3.5 px-4 font-semibold text-slate-700">
+                                    {targetCommName}
+                                  </td>
+                                  <td className="py-3.5 px-4 text-slate-500 font-medium">
+                                    {new Date(req.createdAt || new Date()).toLocaleDateString()}
+                                  </td>
+                                  <td className="py-3.5 px-4">
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-extrabold ${
+                                      reqFilter === 'Pending' 
+                                        ? 'bg-amber-100 text-amber-850'
+                                        : reqFilter === 'Approved'
+                                        ? 'bg-emerald-100 text-emerald-850'
+                                        : 'bg-rose-100 text-rose-850'
+                                    }`}>
+                                      {reqFilter}
+                                    </span>
+                                  </td>
+                                  {reqFilter === 'Pending' && (
+                                    <td className="py-3.5 px-4 text-center">
+                                      <div className="flex items-center justify-center space-x-1.5">
+                                        <button
+                                          disabled={isResolvingAny}
+                                          onClick={() => handleResolveRequest(req.id, 'approved')}
+                                          className={`px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-lg text-[10px] flex items-center space-x-1 cursor-pointer transition-all ${
+                                            isResolvingAny ? 'opacity-65 cursor-not-allowed' : ''
+                                          }`}
+                                        >
+                                          {isResolvingThis ? (
+                                            <>
+                                              <span className="animate-spin border-t-2 border-r-2 border-white rounded-full w-3 h-3 block"></span>
+                                              <span>Approving...</span>
+                                            </>
+                                          ) : (
+                                            <>
+                                              <Check className="w-3 h-3" />
+                                              <span>Approve</span>
+                                            </>
+                                          )}
+                                        </button>
+                                        <button
+                                          disabled={isResolvingAny}
+                                          onClick={() => handleResolveRequest(req.id, 'rejected')}
+                                          className={`px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-lg text-[10px] cursor-pointer transition-all border border-rose-100 ${
+                                            isResolvingAny ? 'opacity-65 cursor-not-allowed' : ''
+                                          }`}
+                                        >
+                                          Reject
+                                        </button>
+                                      </div>
+                                    </td>
+                                  )}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
             )}
 
@@ -735,11 +816,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <div className="bg-white rounded-2xl border divide-y divide-slate-100 shadow-sm overflow-hidden text-xs">
                       {filteredMembers.map((member) => (
                         <div key={member.id} className="p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                          <div className="flex items-center space-x-3 min-w-0">
-                            <img src={member.profileImage} alt="" className="w-9 h-9 rounded-full border bg-slate-50" />
+                          <div 
+                            onClick={() => onViewProfile(member.id)}
+                            className="flex items-center space-x-3 min-w-0 cursor-pointer group"
+                          >
+                            <img src={member.profileImage} alt="" className="w-9 h-9 rounded-full border bg-slate-50 group-hover:scale-105 transition-transform" />
                             <div className="min-w-0">
                               <div className="flex flex-wrap items-center gap-2">
-                                <h4 className="font-extrabold text-slate-900 truncate">{member.name}</h4>
+                                <h4 className="font-extrabold text-slate-900 group-hover:text-indigo-600 transition-colors truncate">{member.name}</h4>
                                 {renderRoleBadge(member.role, member.roleId)}
                                 {member.isCreator && (
                                   <span className="px-1.5 py-0.5 bg-indigo-50 border border-indigo-200 text-indigo-700 font-extrabold text-[9px] rounded uppercase font-mono">
@@ -834,6 +918,37 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       />
                     </div>
 
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-450 uppercase mb-1">Event Type Category</label>
+                        <select
+                          value={evtType}
+                          onChange={(e) => setEvtType(e.target.value)}
+                          className="w-full px-3 py-2.5 bg-slate-50 border rounded-xl text-xs sm:text-sm focus:ring-1 focus:ring-indigo-505 outline-none font-semibold"
+                        >
+                          <option value="Meetup">Meetup</option>
+                          <option value="Workshop">Workshop</option>
+                          <option value="Sports Event">Sports Event</option>
+                          <option value="Startup Networking Events">Startup Networking Events</option>
+                          <option value="Coding Sessions">Coding Sessions</option>
+                          <option value="Career Guidance Sessions">Career Guidance Sessions</option>
+                          <option value="Webinars">Webinars</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-450 uppercase mb-1">Maximum Capacities (Participants Target)</label>
+                        <input
+                          type="number"
+                          required
+                          min={1}
+                          max={5000}
+                          value={evtMaxParticipants}
+                          onChange={(e) => setEvtMaxParticipants(e.target.value)}
+                          className="w-full px-3 py-2.5 bg-slate-50 border rounded-xl text-xs sm:text-sm focus:ring-1 focus:ring-indigo-505 outline-none font-mono"
+                        />
+                      </div>
+                    </div>
+
                     <div>
                       <label className="block text-[10px] font-bold text-slate-450 uppercase mb-1">Detailed Assembly Summary</label>
                       <textarea
@@ -881,37 +996,184 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       0 active events scheduled. Schedule your first meetup above!
                     </p>
                   ) : (
-                    <div className="bg-white rounded-2xl border divide-y shadow-sm overflow-hidden text-xs">
-                      {events.map((evt) => (
-                        <div key={evt.id} className="p-4 flex items-center justify-between">
-                          <div className="min-w-0">
-                            <h4 className="font-extrabold text-slate-905 truncate">{evt.title}</h4>
-                            <p className="text-slate-450 tracking-wider text-[10px] font-mono mt-0.5">
-                              📅 {new Date(evt.eventDate).toLocaleDateString()} &bull; 📍 {evt.location}
-                            </p>
-                            <p className="text-indigo-605 font-bold mt-1 text-[10px]">
-                              {evt.attendees.length} RSVPs submitted
-                            </p>
-                          </div>
+                    <div className="space-y-4">
+                      {/* Active attendance Sheet view overlay */}
+                      {activeAttendanceEventId && (() => {
+                        const activeEvt = events.find(e => e.id === activeAttendanceEventId);
+                        return (
+                          <div className="bg-white p-5 rounded-2xl border-2 border-emerald-300 shadow-sm space-y-4">
+                            <div className="flex justify-between items-start border-b pb-3.5">
+                              <div>
+                                <span className="text-[9px] bg-emerald-100 text-emerald-800 font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider font-mono">
+                                  Mark Sheet Active
+                                </span>
+                                <h3 className="text-sm font-extrabold text-slate-900 mt-1.5 font-sans">
+                                  Assembly Attendance & XP Ledger: <span className="text-indigo-650">{activeEvt?.title}</span>
+                                </h3>
+                                <p className="text-[10px] text-slate-500 mt-0.5">Toggle attendee status and allocate participation reward boosts.</p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setActiveAttendanceEventId(null)}
+                                className="text-slate-400 hover:text-slate-600 font-bold text-xs cursor-pointer border px-2 py-1 rounded-lg hover:bg-slate-50"
+                              >
+                                Collapse Sheet
+                              </button>
+                            </div>
 
-                          <div className="flex items-center space-x-1.5">
-                            <button
-                              onClick={() => handleEditEventClick(evt)}
-                              className="p-1.5 hover:bg-slate-50 text-slate-600 rounded-lg font-medium cursor-pointer"
-                              title="Edit schedule details"
-                            >
-                              <Edit className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteEvent(evt.id)}
-                              className="p-1.5 hover:bg-[rgba(244,63,94,0.08)] text-rose-600 rounded-lg cursor-pointer"
-                              title="Cancel assembly"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            <div className="space-y-2.5 max-h-[320px] overflow-y-auto pr-1">
+                              {attendanceSheet.length === 0 ? (
+                                <p className="p-6 text-center text-xs text-slate-400 italic bg-slate-50 rounded-xl">
+                                  No registered members found in this community to load on the sheet.
+                                </p>
+                              ) : (
+                                attendanceSheet.map((record, index) => (
+                                  <div key={record.userId} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-slate-50 border rounded-xl gap-3 text-xs">
+                                    <div 
+                                      onClick={() => onViewProfile(record.userId)}
+                                      className="flex items-center space-x-3 cursor-pointer group"
+                                    >
+                                      <img
+                                        src={record.profileImage}
+                                        alt=""
+                                        className="w-8 h-8 rounded-full border border-slate-205 bg-white object-cover group-hover:scale-105 transition-transform"
+                                      />
+                                      <div>
+                                        <span className="font-extrabold text-slate-900 block leading-tight group-hover:text-indigo-650 transition-colors">{record.name}</span>
+                                        <span className="text-[10px] text-slate-400 mt-0.5 block font-mono">{record.email}</span>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-3 self-end sm:self-center">
+                                      {/* Status Toggle Box */}
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const updated = [...attendanceSheet];
+                                          updated[index].status = record.status === 'Present' ? 'Absent' : 'Present';
+                                          setAttendanceSheet(updated);
+                                        }}
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
+                                          record.status === 'Present'
+                                            ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                            : 'bg-rose-50/80 text-rose-700 border-rose-220'
+                                        }`}
+                                      >
+                                        ● {record.status}
+                                      </button>
+
+                                      {/* Contribution Category Dropdown */}
+                                      <select
+                                        value={record.contributionType}
+                                        onChange={(e) => {
+                                          const updated = [...attendanceSheet];
+                                          updated[index].contributionType = e.target.value as any;
+                                          setAttendanceSheet(updated);
+                                        }}
+                                        disabled={record.status === 'Absent'}
+                                        className="bg-white border text-xs rounded-lg px-2.5 py-1.5 outline-none disabled:bg-slate-100 disabled:text-slate-400 font-semibold text-slate-700 focus:ring-1 focus:ring-indigo-500"
+                                      >
+                                        <option value="Attendance">Attendance (+10 XP)</option>
+                                        <option value="Volunteer">Volunteer Work (+20 XP)</option>
+                                        <option value="Contribution">Contribution (+15 XP)</option>
+                                        <option value="Organizer">Organizer (+30 XP)</option>
+                                      </select>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+
+                            <div className="flex items-center space-x-2 border-t pt-3.5">
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    setSuccessMsg('');
+                                    setErrorMsg('');
+                                    await api.submitAttendance(activeAttendanceEventId, attendanceSheet);
+                                    setSuccessMsg(`Perfect! Attendance & XP boosts registered for "${activeEvt?.title}"!`);
+                                    setActiveAttendanceEventId(null);
+                                    loadCommunityWorkspaceData();
+                                  } catch (err: any) {
+                                    setErrorMsg(err?.message || 'Failed to submit sheets.');
+                                  }
+                                }}
+                                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs cursor-pointer shadow-sm"
+                              >
+                                Confirm Allocation Ledger
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setActiveAttendanceEventId(null)}
+                                className="px-3.5 py-2.5 bg-slate-150 text-slate-700 hover:bg-slate-200 font-semibold rounded-xl text-xs cursor-pointer"
+                              >
+                                Cancel
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })()}
+
+                      <div className="bg-white rounded-2xl border divide-y shadow-sm overflow-hidden text-xs">
+                        {events.map((evt) => (
+                          <div key={evt.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/35 transition-colors">
+                            <div className="min-w-0 pr-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h4 className="font-extrabold text-slate-905 truncate text-sm">{evt.title}</h4>
+                                <span className="px-2 py-0.5 bg-slate-100 border border-slate-200 text-slate-655 font-bold text-[9px] rounded-full uppercase tracking-wider font-mono">
+                                  {evt.eventType || 'Meetup'}
+                                </span>
+                              </div>
+                              <p className="text-slate-450 tracking-wider text-[10px] font-mono mt-1">
+                                📅 {new Date(evt.eventDate).toLocaleString()} &bull; 📍 {evt.location}
+                              </p>
+                              <div className="flex items-center gap-2 mt-1.5 text-[10px] font-semibold text-indigo-605">
+                                <span>{evt.attendees.length} / {evt.maxParticipants || 50} RSVPs booked</span>
+                                <div className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+                                <span className="text-slate-400 font-normal">Capacity: {Math.round((evt.attendees.length / (evt.maxParticipants || 50)) * 100)}% full</span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-end space-x-1.5 shrink-0">
+                              <button
+                                onClick={() => {
+                                  setActiveAttendanceEventId(evt.id);
+                                  const initialSheet = members.map(m => ({
+                                    userId: m.id,
+                                    name: m.name,
+                                    email: m.email,
+                                    profileImage: m.profileImage || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(m.name)}`,
+                                    status: 'Present' as const,
+                                    contributionType: 'Attendance' as const
+                                  }));
+                                  setAttendanceSheet(initialSheet);
+                                }}
+                                className="px-3 py-1.5 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200 font-bold rounded-xl text-[10px] flex items-center gap-1.5 cursor-pointer shadow-sm transition-all"
+                                title="Mark attendance & award bonuses"
+                              >
+                                <CheckSquare className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+                                <span>Mark Sheet</span>
+                              </button>
+
+                              <button
+                                onClick={() => handleEditEventClick(evt)}
+                                className="p-2 hover:bg-slate-50 text-slate-600 rounded-xl font-medium cursor-pointer border border-slate-150"
+                                title="Edit schedule details"
+                              >
+                                <Edit className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteEvent(evt.id)}
+                                className="p-2 hover:bg-[rgba(244,63,94,0.08)] hover:border-rose-220 text-rose-600 border border-slate-150 rounded-xl cursor-pointer"
+                                title="Cancel assembly"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1167,6 +1429,241 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </button>
                   </div>
                 </form>
+              </div>
+            )}
+
+            {activeTab === 'volunteers' && (
+              <div className="space-y-6">
+                
+                {/* 📊 VOLUNTEER METRICS CONSOLE */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 font-sans">
+                  <div className="bg-white p-4.5 rounded-2xl border border-slate-205 shadow-sm flex items-center space-x-4">
+                    <div className="p-3 bg-indigo-50 text-indigo-650 rounded-xl">
+                      <Heart className="w-5 h-5 shrink-0" />
+                    </div>
+                    <div>
+                      <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider block">Total Approved Volunteers</span>
+                      <h3 className="text-2xl font-black text-indigo-950 mt-1 font-mono">
+                        {Array.from(new Set(volunteers.filter(v => v.status === 'Approved').map(v => v.userId))).length}
+                      </h3>
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-4.5 rounded-2xl border border-slate-205 shadow-sm flex items-center space-x-4">
+                    <div className="p-3 bg-rose-50 text-rose-600 rounded-xl">
+                      <Star className="w-5 h-5 shrink-0" />
+                    </div>
+                    <div>
+                      <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider block">Active Volunteers</span>
+                      <h3 className="text-2xl font-black text-rose-650 mt-1 font-mono">
+                        {Array.from(new Set(volunteers.filter(v => v.status === 'Approved' && (!v.eventDate || new Date(v.eventDate) >= new Date())).map(v => v.userId))).length}
+                      </h3>
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-4.5 rounded-2xl border border-slate-205 shadow-sm flex items-center space-x-4">
+                    <div className="p-3 bg-emerald-50 text-emerald-650 rounded-xl">
+                      <Users className="w-5 h-5 shrink-0" />
+                    </div>
+                    <div>
+                      <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider block">Volunteer Participation Rate</span>
+                      <h3 className="text-2xl font-black text-emerald-600 mt-1 font-mono">
+                        {members.length > 0 ? ((Array.from(new Set(volunteers.filter(v => v.status === 'Approved').map(v => v.userId))).length / members.length) * 100).toFixed(1) + '%' : '0%'}
+                      </h3>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 🏆 TOP VOLUNTEERS (LEADERSHIP RECOGNITION WALL) */}
+                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm font-sans">
+                  <h4 className="font-extrabold text-xs text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                    <Award className="w-4 h-4 text-amber-500 animate-bounce" />
+                    Community Leadership Recognition: Top Volunteers
+                  </h4>
+                  {(() => {
+                    const counts: { [userId: string]: { count: number; points: number; name: string; profileImage?: string; badges: string[] } } = {};
+                    
+                    volunteers.filter(v => v.status === 'Approved').forEach(v => {
+                      if (!counts[v.userId]) {
+                        const mObj = members.find(m => m.id === v.userId);
+                        counts[v.userId] = {
+                          count: 0,
+                          points: 0,
+                          name: mObj ? mObj.name : (v.userName || 'Unknown Member'),
+                          profileImage: mObj ? mObj.profileImage : undefined,
+                          badges: []
+                        };
+                      }
+                      counts[v.userId].count += 1;
+                      counts[v.userId].points += 20;
+                    });
+
+                    Object.keys(counts).forEach(uId => {
+                      const valueObj = counts[uId];
+                      if (valueObj.count >= 3) {
+                        valueObj.badges.push('Volunteer Badge');
+                      }
+                    });
+
+                    const sortedTop = Object.values(counts).sort((a: any, b: any) => b.count - a.count);
+
+                    if (sortedTop.length === 0) {
+                      return <p className="text-xs text-slate-400 py-4 italic">No approved active volunteers registered to the honor boards yet.</p>;
+                    }
+
+                    return (
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-1">
+                        {sortedTop.map((topVo: any, idx) => (
+                          <div key={idx} className="bg-slate-50 border border-slate-100 rounded-xl p-3 flex flex-col justify-between items-start space-y-1 relative overflow-hidden">
+                            <span className="absolute top-1.5 right-1.5 text-slate-300 text-xs font-black font-mono">#{idx + 1}</span>
+                            <div className="flex items-center space-x-2">
+                              {topVo.profileImage ? (
+                                <img src={topVo.profileImage} alt="" className="w-7 h-7 rounded-full object-cover" referrerPolicy="no-referrer" />
+                              ) : (
+                                <div className="w-7 h-7 bg-indigo-100 text-indigo-700 rounded-full font-black text-[10px] flex items-center justify-center">
+                                  {topVo.name.slice(0, 2).toUpperCase()}
+                                </div>
+                              )}
+                              <div>
+                                <span className="block font-bold text-xs text-slate-805 line-clamp-1">{topVo.name}</span>
+                                <span className="text-[10px] text-slate-400 font-medium font-mono block leading-none mt-0.5">{topVo.count} Events</span>
+                              </div>
+                            </div>
+                            
+                            <div className="w-full pt-2 flex items-center justify-between border-t border-slate-200/50 mt-1">
+                              <span className="text-[10px] font-black text-indigo-750 bg-indigo-50 px-1.5 py-0.5 rounded leading-none font-mono">
+                                +{topVo.points} XP
+                              </span>
+                              <div className="flex flex-wrap gap-1 justify-end">
+                                {topVo.badges.map((b: string, bIdx: number) => (
+                                  <span key={bIdx} className="bg-rose-100 text-rose-700 font-extrabold px-1.5 py-0.5 rounded text-[8px] uppercase tracking-wider flex items-center gap-0.5" title="Volunteer Badge: Awarded for 3+ approved events.">
+                                    🎗️ {b}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* 📋 VOLUNTEER REQUESTS PANEL */}
+                <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm font-sans">
+                  <div className="p-4 border-b bg-slate-50 flex items-center justify-between">
+                    <h3 className="font-extrabold text-slate-800 text-xs uppercase tracking-widest">
+                      Volunteer Applications Logs ({volunteers.length})
+                    </h3>
+                  </div>
+
+                  {volunteers.length === 0 ? (
+                    <div className="p-12 text-center">
+                      <Heart className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+                      <p className="text-sm font-semibold text-slate-700">No Volunteer requests found</p>
+                      <p className="text-xs text-slate-450 mt-1">Volunteer forms submitted by active circular members will accumulate here.</p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs text-slate-650">
+                        <thead className="bg-slate-50 font-bold text-slate-500 border-b uppercase text-[9px] tracking-wider font-mono">
+                          <tr>
+                            <th className="p-4">Member</th>
+                            <th className="p-4">Circle & Event</th>
+                            <th className="p-4">Motivation & Skills</th>
+                            <th className="p-4">Submitted Date</th>
+                            <th className="p-4">Status</th>
+                            <th className="p-4 text-right">Review Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 text-xs">
+                          {volunteers.map((vol) => (
+                            <tr key={vol.id} className="hover:bg-slate-50/50 transition-colors">
+                              <td className="p-4">
+                                <div className="flex items-center space-x-2.5">
+                                  {vol.userProfileImage ? (
+                                    <img src={vol.userProfileImage} alt="" className="w-8 h-8 rounded-full object-cover" referrerPolicy="no-referrer" />
+                                  ) : (
+                                    <div className="w-8 h-8 bg-indigo-100 text-indigo-705 rounded-full font-black text-[10px] flex items-center justify-center shrink-0">
+                                      {vol.userName ? vol.userName.slice(0, 2).toUpperCase() : 'US'}
+                                    </div>
+                                  )}
+                                  <div>
+                                    <span className="block font-bold text-slate-900 leading-tight">{vol.userName || 'Unknown user'}</span>
+                                    <span className="text-[10px] text-slate-400 font-mono">ID: {vol.userId}</span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="p-4">
+                                <div className="font-extrabold text-slate-900">{vol.eventTitle}</div>
+                                <div className="text-[10px] text-slate-400 font-medium">Circle: {vol.communityName}</div>
+                              </td>
+                              <td className="p-4 max-w-sm">
+                                <div className="space-y-1.5">
+                                  <div>
+                                    <span className="text-[9px] font-black uppercase text-indigo-650 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">
+                                      SKILLS: {vol.skills}
+                                    </span>
+                                  </div>
+                                  <div className="text-slate-600 font-normal leading-relaxed text-xs">
+                                    <strong className="text-slate-500 block font-bold text-[10px] uppercase">Motivation:</strong>
+                                    "{vol.motivation}"
+                                  </div>
+                                  {vol.experience && (
+                                    <div className="text-slate-400 text-[11px] leading-relaxed">
+                                      <strong className="text-slate-400 block font-bold text-[9px] uppercase">Experience:</strong>
+                                      {vol.experience}
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="p-4 font-mono text-slate-500">
+                                {vol.createdAt ? new Date(vol.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Unknown Date'}
+                              </td>
+                              <td className="p-4">
+                                {vol.status === 'Pending' && (
+                                  <span className="bg-amber-50 text-amber-750 border border-amber-200 px-2 py-0.5 rounded-full font-black text-[9px] uppercase tracking-wider">
+                                    Pending
+                                  </span>
+                                )}
+                                {vol.status === 'Approved' && (
+                                  <span className="bg-emerald-50 text-emerald-755 border border-emerald-200 px-2 py-0.5 rounded-full font-black text-[9px] uppercase tracking-wider">
+                                    Approved
+                                  </span>
+                                )}
+                                {vol.status === 'Rejected' && (
+                                  <span className="bg-rose-50 text-rose-755 border border-rose-220 px-2 py-0.5 rounded-full font-black text-[9px] uppercase tracking-wider">
+                                    Declined
+                                  </span>
+                                )}
+                              </td>
+                              <td className="p-4 text-right">
+                                {vol.status === 'Pending' ? (
+                                  <div className="flex items-center justify-end space-x-1.5 shadow-xs">
+                                    <button
+                                      onClick={() => handleResolveVolunteer(vol.id, 'Approved')}
+                                      className="p-1 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] rounded-lg cursor-pointer flex items-center space-x-0.5 transition-all"
+                                    >
+                                      <Check className="w-3.5 h-3.5" /> <span>Approve</span>
+                                    </button>
+                                    <button
+                                      onClick={() => handleResolveVolunteer(vol.id, 'Rejected')}
+                                      className="p-1 px-2.5 bg-rose-50 hover:bg-rose-600 text-rose-600 hover:text-white border border-rose-200 font-bold text-[10px] rounded-lg cursor-pointer flex items-center space-x-0.5 transition-all"
+                                    >
+                                      <X className="w-3.5 h-3.5" /> <span>Reject</span>
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className="text-[10px] text-slate-400 italic">Resolved</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

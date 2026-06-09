@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { dbStore, calculateDistance, User, Community, JoinRequest, Event, Announcement, Notification } from './store';
+import { getUserGamification } from './gamification';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecret-communityhub-token-key-2026';
 
@@ -83,7 +84,7 @@ apiRouter.post('/auth/register', (req, res) => {
     passwordHash,
     role: role as User['role'],
     profileImage: `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(name)}`,
-    location: location || { latitude: 37.7749, longitude: -122.4194, city: 'San Francisco', state: 'California' },
+    location: location || { latitude: 17.3850, longitude: 78.4867, city: 'Hyderabad', state: 'Telangana' },
     interests,
     createdAt: new Date().toISOString()
   };
@@ -108,7 +109,8 @@ apiRouter.post('/auth/register', (req, res) => {
       profileImage: newUser.profileImage,
       location: newUser.location,
       interests: newUser.interests,
-      createdAt: newUser.createdAt
+      createdAt: newUser.createdAt,
+      gamification: getUserGamification(newUser.id)
     }
   });
 });
@@ -144,7 +146,8 @@ apiRouter.post('/auth/login', (req, res) => {
       profileImage: user.profileImage,
       location: user.location,
       interests: user.interests,
-      createdAt: user.createdAt
+      createdAt: user.createdAt,
+      gamification: getUserGamification(user.id)
     }
   });
 });
@@ -169,7 +172,8 @@ apiRouter.get('/auth/me', authenticateToken, (req: AuthenticatedRequest, res) =>
       profileImage: user.profileImage,
       location: user.location,
       interests: user.interests,
-      createdAt: user.createdAt
+      createdAt: user.createdAt,
+      gamification: getUserGamification(user.id)
     }
   });
 });
@@ -314,6 +318,28 @@ apiRouter.get('/communities/:id', (req, res) => {
   const events = dbStore.getEvents().filter(e => e.communityId === commId);
   const announcements = dbStore.getAnnouncements().filter(a => a.communityId === commId);
 
+  // Fetch approved volunteers for these events to list publicly
+  const volunteersList = dbStore.getVolunteers().filter(v => v.communityId === commId && v.status === 'Approved');
+  const uList = dbStore.getUsers();
+
+  const eventsWithVolunteers = events.map(e => {
+    const eventVols = volunteersList.filter(v => v.eventId === e.id);
+    const enrichedVols = eventVols.map(v => {
+      const userObj = uList.find(u => u.id === v.userId);
+      return {
+        id: v.id,
+        userId: v.userId,
+        userName: userObj ? userObj.name : 'Unknown User',
+        userProfileImage: userObj ? userObj.profileImage : undefined,
+        status: v.status
+      };
+    });
+    return {
+      ...e,
+      volunteers: enrichedVols
+    };
+  });
+
   // Fetch admin profile info to attach
   const admin = dbStore.getUsers().find(u => u.id === comm.adminId);
 
@@ -323,7 +349,7 @@ apiRouter.get('/communities/:id', (req, res) => {
       adminName: admin ? admin.name : 'Unknown Admin',
       adminProfileImage: admin ? admin.profileImage : undefined
     },
-    events,
+    events: eventsWithVolunteers,
     announcements,
   });
 });
@@ -609,10 +635,51 @@ apiRouter.post('/communities/:id/leave', authenticateToken, (req: AuthenticatedR
     return;
   }
 
+  // Remove from community members list
   comm.members.splice(index, 1);
+
+  // Remove from memberships table
+  const memberships = dbStore.getDB().memberships || [];
+  const mIndex = memberships.findIndex(m => m.communityId === commId && m.userId === userId);
+  if (mIndex !== -1) {
+    memberships.splice(mIndex, 1);
+  }
+
+  // Delete join request completely to allow reapplying
+  const joinReqs = dbStore.getJoinRequests();
+  const rIndex = joinReqs.findIndex(r => r.communityId === commId && r.userId === userId);
+  if (rIndex !== -1) {
+    joinReqs.splice(rIndex, 1);
+  }
+
   dbStore.flush();
 
   res.json({ message: 'Successfully departed the community.' });
+});
+
+// Post /api/join-requests/:id/withdraw
+apiRouter.post('/join-requests/:id/withdraw', authenticateToken, (req: AuthenticatedRequest, res) => {
+  const requestId = req.params.id;
+  const userId = req.user?.id!;
+
+  const reqs = dbStore.getJoinRequests();
+  const index = reqs.findIndex(r => r.id === requestId && r.userId === userId);
+  if (index === -1) {
+    res.status(404).json({ error: 'Pending join request not found or not owned by you.' });
+    return;
+  }
+
+  const joinReq = reqs[index];
+  if (joinReq.status !== 'Pending' && (joinReq as any).status !== 'pending') {
+    res.status(400).json({ error: 'Only pending requests can be withdrawn.' });
+    return;
+  }
+
+  // Remove request from database
+  reqs.splice(index, 1);
+  dbStore.flush();
+
+  res.json({ message: 'Join request successfully withdrawn.' });
 });
 
 // Get /api/join-requests
@@ -636,6 +703,46 @@ apiRouter.get('/join-requests', authenticateToken, (req: AuthenticatedRequest, r
 // -----------------------------------------------------------------------------
 // EVENT PARTICIPATION ENDPOINTS
 // -----------------------------------------------------------------------------
+
+apiRouter.get('/events/public', (req, res) => {
+  const { lat, lon, radius } = req.query;
+  const events = dbStore.getEvents();
+  const communities = dbStore.getCommunities();
+
+  let eventsWithDistance = events.map(e => {
+    const comm = communities.find(c => c.id === e.communityId);
+    let distance: number | undefined = undefined;
+    if (comm && lat && lon) {
+      distance = calculateDistance(
+        Number(lat),
+        Number(lon),
+        comm.latitude,
+        comm.longitude
+      );
+    }
+    return {
+      ...e,
+      communityName: comm ? comm.name : 'Unknown Community',
+      communityLogo: comm ? comm.logo : undefined,
+      city: comm ? comm.city : 'Unknown',
+      state: comm ? comm.state : 'Unknown',
+      distance
+    };
+  });
+
+  if (radius && lat && lon) {
+    const limit = Number(radius);
+    eventsWithDistance = eventsWithDistance.filter(e => e.distance !== undefined && e.distance <= limit);
+  }
+
+  if (lat && lon) {
+    eventsWithDistance.sort((a, b) => (a.distance || 0) - (b.distance || 0));
+  } else {
+    eventsWithDistance.sort((a, b) => new Date(b.eventDate).getTime() - new Date(a.eventDate).getTime());
+  }
+
+  res.json({ events: eventsWithDistance });
+});
 
 apiRouter.get('/events', authenticateToken, (req: AuthenticatedRequest, res) => {
   const userId = req.user?.id!;
@@ -969,7 +1076,8 @@ apiRouter.get('/admin/communities/:id/members', authenticateToken, requireRole([
     role: u.role,
     profileImage: u.profileImage,
     isCreator: u.id === comm.adminId,
-    joinedAt: u.createdAt
+    joinedAt: u.createdAt,
+    gamification: getUserGamification(u.id)
   }));
 
   res.json({ members });
@@ -1076,7 +1184,7 @@ apiRouter.post('/admin/communities/:id/members/:userId/assign-moderator', authen
 // Create Event
 apiRouter.post('/admin/communities/:id/events', authenticateToken, requireRole(['Community Admin', 'Super Admin']), checkCommunityManagement, (req: AuthenticatedRequest, res) => {
   const commId = req.params.id;
-  const { title, description, eventDate, location } = req.body;
+  const { title, description, eventDate, location, eventType = 'Meetup', maxParticipants = 50 } = req.body;
 
   if (!title || !description || !eventDate || !location) {
     res.status(400).json({ error: 'All event details must be complete' });
@@ -1092,6 +1200,8 @@ apiRouter.post('/admin/communities/:id/events', authenticateToken, requireRole([
     location,
     communityId: commId,
     attendees: [req.user?.id!], // Organizer is first attendee
+    eventType: eventType as any,
+    maxParticipants: Number(maxParticipants),
     createdAt: new Date().toISOString()
   };
 
@@ -1104,7 +1214,7 @@ apiRouter.post('/admin/communities/:id/events', authenticateToken, requireRole([
     if (memberId !== req.user?.id) {
       dbStore.addNotification(
         memberId,
-        `New Event Scheduled in "${comm.name}": "${title}". Submit your RSVP now!`,
+        `New ${eventType} Scheduled in "${comm.name}": "${title}". Submit your RSVP now!`,
         'info',
         `/community/${commId}?tab=events`
       );
@@ -1117,7 +1227,7 @@ apiRouter.post('/admin/communities/:id/events', authenticateToken, requireRole([
 // Edit Event
 apiRouter.put('/admin/events/:eventId', authenticateToken, requireRole(['Community Admin', 'Super Admin']), (req: AuthenticatedRequest, res) => {
   const { eventId } = req.params;
-  const { title, description, eventDate, location } = req.body;
+  const { title, description, eventDate, location, eventType, maxParticipants } = req.body;
 
   const events = dbStore.getEvents();
   const event = events.find(e => e.id === eventId);
@@ -1137,6 +1247,8 @@ apiRouter.put('/admin/events/:eventId', authenticateToken, requireRole(['Communi
   if (description) event.description = description;
   if (eventDate) event.eventDate = eventDate;
   if (location) event.location = location;
+  if (eventType) event.eventType = eventType;
+  if (maxParticipants !== undefined) event.maxParticipants = Number(maxParticipants);
 
   dbStore.flush();
 
@@ -1477,3 +1589,436 @@ apiRouter.get('/super-admin/analytics', authenticateToken, requireRole(['Super A
     }
   });
 });
+
+// Mark Attendance & Save Contributions
+apiRouter.post('/admin/events/:eventId/attendance', authenticateToken, requireRole(['Community Admin', 'Super Admin']), (req: AuthenticatedRequest, res) => {
+  const { eventId } = req.params;
+  const { attendance } = req.body; // array of { userId: string, status: 'Present'|'Absent', contributionType?: string }
+
+  const event = dbStore.getEvents().find(e => e.id === eventId);
+  if (!event) {
+    res.status(404).json({ error: 'Event not found' });
+    return;
+  }
+
+  const comm = dbStore.getCommunities().find(c => c.id === event.communityId)!;
+  if (req.user?.role !== 'Super Admin' && comm.adminId !== req.user?.id) {
+    res.status(403).json({ error: 'Access Denied: You do not manage this community' });
+    return;
+  }
+
+  const attendanceList = dbStore.getAttendance();
+
+  if (Array.isArray(attendance)) {
+    attendance.forEach(item => {
+      const { userId, status, contributionType = 'Attendance' } = item;
+      
+      let record = attendanceList.find(a => a.userId === userId && a.eventId === eventId);
+      if (record) {
+        record.status = status;
+        record.contributionType = contributionType;
+        record.date = new Date().toISOString();
+      } else {
+        attendanceList.push({
+          id: 'att_' + Math.random().toString(36).substr(2, 9),
+          userId,
+          eventId,
+          date: new Date().toISOString(),
+          status,
+          contributionType
+        });
+      }
+
+      // Automatically add a customized notification for reward recognition
+      if (status === 'Present') {
+        const rewardPoints = contributionType === 'Volunteer' ? 20 
+          : (contributionType === 'Contribution' ? 15 
+          : (contributionType === 'Organizer' ? 30 : 10));
+
+        dbStore.addNotification(
+          userId,
+          `You have been marked Present as "${contributionType}" for "${event.title}"! Earned +${rewardPoints} Points.`,
+          'success',
+          '/leaderboard'
+        );
+      }
+    });
+
+    dbStore.flush();
+  }
+
+  res.json({ message: 'Attendance and reward indices updated successfully.' });
+});
+
+// Fetch Leaderboard rankings
+apiRouter.get('/leaderboard', authenticateToken, (req: AuthenticatedRequest, res) => {
+  const { range = 'All-Time' } = req.query; // Weekly, Monthly, All-Time
+  const users = dbStore.getUsers().filter(u => u.role !== 'Super Admin'); // Compare regular members
+  
+  let dateLimitMs: number | undefined = undefined;
+  if (range === 'Weekly') {
+    dateLimitMs = 7 * 24 * 60 * 60 * 1000;
+  } else if (range === 'Monthly') {
+    dateLimitMs = 30 * 24 * 60 * 60 * 1000;
+  }
+
+  const list = users.map(u => {
+    const stats = getUserGamification(u.id, dateLimitMs);
+    return {
+      id: u.id,
+      name: u.name,
+      profileImage: u.profileImage,
+      location: u.location,
+      role: u.role,
+      points: stats.totalPoints,
+      stars: stats.stars,
+      level: stats.level,
+      eventsAttended: stats.eventsAttended,
+      volunteerActivities: stats.volunteerActivities,
+      currentStreak: stats.currentStreak,
+      highestStreak: stats.highestStreak,
+      badges: stats.badges.filter(b => b.earned)
+    };
+  });
+
+  // Sort by points descending, events descending, then name ascending
+  list.sort((a, b) => {
+    if (b.points !== a.points) return b.points - a.points;
+    if (b.eventsAttended !== a.eventsAttended) return b.eventsAttended - a.eventsAttended;
+    return a.name.localeCompare(b.name);
+  });
+
+  const rankedLeaderboard = list.map((item, index) => ({
+    ...item,
+    rank: index + 1
+  }));
+
+  res.json({ leaderboard: rankedLeaderboard });
+});
+
+// Dynamic Community Recognition Wall
+apiRouter.get('/recognition', authenticateToken, (req, res) => {
+  const users = dbStore.getUsers().filter(u => u.role !== 'Super Admin');
+  const userStats = users.map(u => ({
+    user: {
+      id: u.id,
+      name: u.name,
+      profileImage: u.profileImage,
+      location: u.location,
+      role: u.role,
+      joinedAt: u.createdAt
+    },
+    stats: getUserGamification(u.id)
+  }));
+
+  // Top Contributor - highest points
+  const sortedByPoints = [...userStats].sort((a, b) => b.stats.totalPoints - a.stats.totalPoints);
+  const topContributor = sortedByPoints[0]?.stats.totalPoints > 0 ? sortedByPoints[0] : null;
+
+  // Top Volunteer - most volunteer events
+  const sortedByVolunteer = [...userStats].sort((a, b) => b.stats.volunteerActivities - a.stats.volunteerActivities);
+  const topVolunteer = sortedByVolunteer[0]?.stats.volunteerActivities > 0 ? sortedByVolunteer[0] : null;
+
+  // Community Champion - most events attended
+  const sortedByEvents = [...userStats].sort((a, b) => b.stats.eventsAttended - a.stats.eventsAttended);
+  const communityChampion = sortedByEvents[0]?.stats.eventsAttended > 0 ? sortedByEvents[0] : null;
+
+  // Rising Star - Joined in the last 30 days and has some participation
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const risingStars = userStats.filter(item => {
+    const joinedTime = new Date(item.user.joinedAt).getTime();
+    return joinedTime >= thirtyDaysAgo && item.stats.totalPoints > 0;
+  });
+  risingStars.sort((a, b) => b.stats.totalPoints - a.stats.totalPoints);
+  const risingStar = risingStars[0] || null;
+
+  // Member of the Month - Most event attendances in the last 30 days
+  const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+  const monthlyStats = users.map(u => ({
+    user: {
+      id: u.id,
+      name: u.name,
+      profileImage: u.profileImage,
+      location: u.location
+    },
+    stats: getUserGamification(u.id, thirtyDaysMs)
+  }));
+  monthlyStats.sort((a, b) => b.stats.eventsAttended - a.stats.eventsAttended);
+  const memberOfTheMonth = monthlyStats[0]?.stats.eventsAttended > 0 ? monthlyStats[0] : null;
+
+  res.json({
+    recognition: {
+      topContributor,
+      topVolunteer,
+      communityChampion,
+      risingStar,
+      memberOfTheMonth
+    }
+  });
+});
+
+// -----------------------------------------------------------------------------
+// PUBLIC MEMBER PROFILE ENDPOINT
+// -----------------------------------------------------------------------------
+apiRouter.get('/users/:id/profile', authenticateToken, (req: AuthenticatedRequest, res) => {
+  const targetUserId = req.params.id;
+  const user = dbStore.getUsers().find(u => u.id === targetUserId);
+  if (!user) {
+    res.status(404).json({ error: 'User not found' });
+    return;
+  }
+
+  // Get gamification stats
+  const stats = getUserGamification(targetUserId);
+
+  // Get joined communities
+  const communities = dbStore.getCommunities().filter(c => c.members.includes(targetUserId));
+
+  // Get total events attended (event history)
+  const userAttendances = dbStore.getAttendance().filter(a => a.userId === targetUserId && a.status === 'Present');
+  const evts = dbStore.getEvents();
+  const eventHistory = userAttendances.map(a => {
+    const event = evts.find(e => e.id === a.eventId);
+    const comm = communities.find(c => c.id === event?.communityId);
+    return {
+      eventId: a.eventId,
+      status: a.status,
+      date: a.date,
+      contributionType: a.contributionType,
+      title: event ? event.title : 'Deleted Event',
+      eventType: event ? event.eventType : 'Meetup',
+      communityName: comm ? comm.name : 'Unknown Community',
+    };
+  });
+
+  // Calculate community rank
+  const allUsers = dbStore.getUsers().filter(u => u.role !== 'Super Admin');
+  const userPointsList = allUsers.map(u => ({
+    userId: u.id,
+    points: getUserGamification(u.id).totalPoints,
+  }));
+  userPointsList.sort((a, b) => b.points - a.points);
+  const rank = userPointsList.findIndex(item => item.userId === targetUserId) + 1;
+
+  res.json({
+    profile: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      roleId: user.roleId,
+      profileImage: user.profileImage,
+      location: user.location,
+      interests: user.interests || [],
+      createdAt: user.createdAt,
+      rank,
+      points: stats.totalPoints,
+      stars: stats.stars,
+      level: stats.level,
+      currentStreak: stats.currentStreak,
+      highestStreak: stats.highestStreak,
+      earnedBadges: stats.badges.filter(b => b.earned),
+      lockedBadges: stats.badges.filter(b => !b.earned),
+      communitiesJoined: communities.length,
+      volunteerActivitiesCount: stats.volunteerActivities,
+      totalEventsAttended: stats.eventsAttended,
+      eventHistory,
+    }
+  });
+});
+
+// -----------------------------------------------------------------------------
+// VOLUNTEER SYSTEM ENDPOINTS
+// -----------------------------------------------------------------------------
+
+apiRouter.post('/events/:id/volunteer', authenticateToken, (req: AuthenticatedRequest, res) => {
+  const eventId = req.params.id;
+  const userId = req.user?.id!;
+
+  const evts = dbStore.getEvents();
+  const event = evts.find(e => e.id === eventId);
+  if (!event) {
+    res.status(404).json({ error: 'Event not found' });
+    return;
+  }
+
+  // Check if user is a member of this community
+  const comm = dbStore.getCommunities().find(c => c.id === event.communityId);
+  if (!comm || !comm.members.includes(userId)) {
+    res.status(403).json({ error: 'You must join this community first to volunteer.' });
+    return;
+  }
+
+  // Check if they already applied
+  const vList = dbStore.getVolunteers();
+  const existing = vList.find(v => v.eventId === eventId && v.userId === userId);
+  if (existing) {
+    res.status(400).json({ error: 'You have already applied to volunteer for this event.' });
+    return;
+  }
+
+  const { motivation, skills, experience } = req.body;
+  if (!motivation || !skills) {
+    res.status(400).json({ error: 'Please provide why you want to volunteer and your skills contribution.' });
+    return;
+  }
+
+  const volApp: any = {
+    id: 'vol_' + Math.random().toString(36).substr(2, 9),
+    userId,
+    eventId,
+    communityId: event.communityId,
+    status: 'Pending',
+    motivation,
+    skills,
+    experience: experience || '',
+    appliedAt: new Date().toISOString()
+  };
+
+  vList.push(volApp);
+  dbStore.flush();
+
+  res.json({ message: 'Volunteer application submitted successfully!', volunteer: volApp });
+});
+
+apiRouter.delete('/events/:id/volunteer', authenticateToken, (req: AuthenticatedRequest, res) => {
+  const eventId = req.params.id;
+  const userId = req.user?.id!;
+
+  const vList = dbStore.getVolunteers();
+  const index = vList.findIndex(v => v.eventId === eventId && v.userId === userId && v.status === 'Pending');
+  if (index === -1) {
+    res.status(400).json({ error: 'Pending volunteer request not found or already processed.' });
+    return;
+  }
+
+  vList.splice(index, 1);
+  dbStore.flush();
+
+  res.json({ message: 'Volunteer request withdrawn successfully!' });
+});
+
+apiRouter.get('/volunteers/my', authenticateToken, (req: AuthenticatedRequest, res) => {
+  const userId = req.user?.id!;
+  const vList = dbStore.getVolunteers();
+  const myVolunteers = vList.filter(v => v.userId === userId);
+
+  const evts = dbStore.getEvents();
+  const comms = dbStore.getCommunities();
+
+  const enriched = myVolunteers.map(v => {
+    const event = evts.find(e => e.id === v.eventId);
+    const comm = comms.find(c => c.id === v.communityId);
+    return {
+      ...v,
+      eventTitle: event ? event.title : 'Deleted Event',
+      eventDate: event ? event.eventDate : undefined,
+      location: event ? event.location : undefined,
+      communityName: comm ? comm.name : 'Deleted Community',
+    };
+  });
+
+  res.json({ volunteers: enriched });
+});
+
+apiRouter.get('/admin/communities/:id/volunteers', authenticateToken, requireRole(['Community Admin', 'Super Admin']), checkCommunityManagement, (req: AuthenticatedRequest, res) => {
+  const commId = req.params.id;
+  const vList = dbStore.getVolunteers().filter(v => v.communityId === commId);
+
+  const uList = dbStore.getUsers();
+  const evts = dbStore.getEvents();
+
+  const enriched = vList.map(v => {
+    const user = uList.find(u => u.id === v.userId);
+    const event = evts.find(e => e.id === v.eventId);
+
+    return {
+      ...v,
+      userName: user ? user.name : 'Unknown',
+      userEmail: user ? user.email : 'Unknown',
+      userProfileImage: user ? user.profileImage : undefined,
+      eventTitle: event ? event.title : 'Deleted Event',
+      eventDate: event ? event.eventDate : undefined,
+    };
+  });
+
+  res.json({ volunteers: enriched });
+});
+
+apiRouter.post('/admin/volunteers/:volunteerId/status', authenticateToken, requireRole(['Community Admin', 'Super Admin']), (req: AuthenticatedRequest, res) => {
+  const { volunteerId } = req.params;
+  const { status } = req.body; // 'Approved' | 'Rejected'
+
+  if (!['Approved', 'Rejected'].includes(status)) {
+    res.status(400).json({ error: 'Status must be Approved or Rejected' });
+    return;
+  }
+
+  const vList = dbStore.getVolunteers();
+  const volRec = vList.find(v => v.id === volunteerId);
+  if (!volRec) {
+    res.status(404).json({ error: 'Volunteer records not found' });
+    return;
+  }
+
+  // Check if requester is community admin
+  const comm = dbStore.getCommunities().find(c => c.id === volRec.communityId);
+  if (!comm) {
+    res.status(404).json({ error: 'Community not found' });
+    return;
+  }
+
+  if (req.user?.role !== 'Super Admin' && comm.adminId !== req.user?.id) {
+    res.status(403).json({ error: 'Forbidden: You do not manage this community.' });
+    return;
+  }
+
+  volRec.status = status;
+
+  // Add notification to member
+  const evts = dbStore.getEvents();
+  const event = evts.find(e => e.id === volRec.eventId);
+  const eventTitle = event ? event.title : 'Event';
+
+  if (status === 'Approved') {
+    dbStore.addNotification(
+      volRec.userId,
+      `Hooray! You are APPROVED as a volunteer for "${eventTitle}"!`,
+      'success'
+    );
+
+    // Link volunteer role and grant points/volunteerActivities via an Attendance record
+    const attendanceLogs = dbStore.getAttendance();
+    const existingAtt = attendanceLogs.find(a => a.userId === volRec.userId && a.eventId === volRec.eventId);
+    if (existingAtt) {
+      existingAtt.status = 'Present';
+      existingAtt.contributionType = 'Volunteer';
+    } else {
+      attendanceLogs.push({
+        id: 'att_' + Math.random().toString(36).substr(2, 9),
+        userId: volRec.userId,
+        eventId: volRec.eventId,
+        date: event ? event.eventDate : new Date().toISOString(),
+        status: 'Present',
+        contributionType: 'Volunteer'
+      });
+    }
+  } else {
+    dbStore.addNotification(
+      volRec.userId,
+      `Unfortunately, your volunteer request for "${eventTitle}" was not approved.`,
+      'warning'
+    );
+
+    // If previously approved and now rejected, make sure to clean up any Attendance record that gave them volunteer status
+    const attendanceLogs = dbStore.getAttendance();
+    const idx = attendanceLogs.findIndex(a => a.userId === volRec.userId && a.eventId === volRec.eventId && a.contributionType === 'Volunteer');
+    if (idx !== -1) {
+      attendanceLogs.splice(idx, 1);
+    }
+  }
+
+  dbStore.flush();
+  res.json({ message: `Volunteer status successfully updated to ${status}.`, volunteer: volRec });
+});
+

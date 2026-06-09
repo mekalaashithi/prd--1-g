@@ -103,9 +103,9 @@ export const Navbar: React.FC<NavbarProps> = ({
             onClick={() => onChangeTab('discover')}
             className="flex items-center space-x-2 bg-transparent border-0 p-0 text-slate-950 font-extrabold text-lg tracking-tight font-sans cursor-pointer outline-none"
           >
-            <Compass className="w-5 h-5 text-indigo-600 stroke-[2.5]" />
-            <span className="bg-gradient-to-r from-slate-900 to-indigo-800 bg-clip-text text-transparent">
-              Community<span className="text-indigo-600 font-extrabold">Hub</span>
+            <Compass className="w-5 h-5 text-blue-600 stroke-[2.5]" />
+            <span className="bg-gradient-to-r from-slate-900 to-blue-800 bg-clip-text text-transparent">
+              Community<span className="text-blue-600 font-extrabold"> Nexus</span>
             </span>
           </button>
 
@@ -276,9 +276,9 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
               <button
                 onClick={() => onTriggerAuth('register')}
-                className="px-3.5 py-1.5 text-xs font-sans font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-sm transition-all cursor-pointer"
+                className="px-3.5 py-1.5 text-xs font-sans font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-all cursor-pointer"
               >
-                Join CommunityHub
+                Join Community Nexus
               </button>
             </div>
           )}

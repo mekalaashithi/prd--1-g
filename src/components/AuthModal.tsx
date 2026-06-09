@@ -23,11 +23,11 @@ const INTEREST_OPTIONS = [
 ];
 
 const PRESET_LOCATIONS = [
-  { name: 'San Francisco, CA', lat: 37.7749, lon: -122.4194, city: 'San Francisco', state: 'California' },
-  { name: 'Oakland, CA', lat: 37.8044, lon: -122.2711, city: 'Oakland', state: 'California' },
-  { name: 'San Jose, CA', lat: 37.3382, lon: -121.8863, city: 'San Jose', state: 'California' },
-  { name: 'Berkeley, CA', lat: 37.8715, lon: -122.2730, city: 'Berkeley', state: 'California' },
-  { name: 'San Rafael, CA', lat: 37.9735, lon: -122.5311, city: 'San Rafael', state: 'California' }
+  { name: 'Hyderabad, Telangana', lat: 17.3850, lon: 78.4867, city: 'Hyderabad', state: 'Telangana' },
+  { name: 'Visakhapatnam, AP', lat: 17.6868, lon: 83.2185, city: 'Visakhapatnam', state: 'Andhra Pradesh' },
+  { name: 'Vijayawada, AP', lat: 16.5062, lon: 80.6480, city: 'Vijayawada', state: 'Andhra Pradesh' },
+  { name: 'Tirupati, AP', lat: 13.6288, lon: 79.4192, city: 'Tirupati', state: 'Andhra Pradesh' },
+  { name: 'Warangal, Telangana', lat: 17.9689, lon: 79.5941, city: 'Warangal', state: 'Telangana' }
 ];
 
 export const AuthModal: React.FC<AuthModalProps> = ({

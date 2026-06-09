@@ -1,6 +1,6 @@
 {
-  "name": "CommunityHub",
-  "description": "A portfolio-worthy community directory and management platform featuring location-based discovery, events, notifications, and granular dashboards for Members, Community Admins, and Super Admins.",
+  "name": "Community Nexus",
+  "description": "A startup-grade community portal that unites hyper-local hubs, manages neighborhood notice boards, organizes local events and volunteer coordination with live GPS distance calculations and interactive maps.",
   "requestFramePermissions": ["geolocation"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

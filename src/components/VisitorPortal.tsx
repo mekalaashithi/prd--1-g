@@ -31,21 +31,24 @@ export const VisitorPortal: React.FC<VisitorPortalProps> = ({
   const [radius, setRadius] = useState('');
   
   // Geolocation states
-  const [userLat, setUserLat] = useState<number | null>(37.7749); // default SF Lat
-  const [userLon, setUserLon] = useState<number | null>(-122.4194); // default SF Lon
+  const [userLat, setUserLat] = useState<number | null>(17.3850); // default Hyd Lat
+  const [userLon, setUserLon] = useState<number | null>(78.4867); // default Hyd Lon
   const [geoMode, setGeoMode] = useState<'granted' | 'simulated' | 'denied' | 'locating'>('simulated');
-  const [selectedSimLocation, setSelectedSimLocation] = useState('San Francisco, CA');
+  const [selectedSimLocation, setSelectedSimLocation] = useState('Hyderabad, Telangana');
 
   // Display toggles
   const [viewMode, setViewMode] = useState<'grid' | 'map'>('grid');
   const [errorMsg, setErrorMsg] = useState('');
 
+  const [nearbyEvents, setNearbyEvents] = useState<any[]>([]);
+  const [loadingEvents, setLoadingEvents] = useState(true);
+
   const SIMULATED_PRES_LOCATIONS = [
-    { label: 'San Francisco (SF Center)', lat: 37.7749, lon: -122.4194 },
-    { label: 'Oakland (East Bay)', lat: 37.8044, lon: -122.2711 },
-    { label: 'San Jose (South Bay)', lat: 37.3382, lon: -121.8863 },
-    { label: 'Berkeley University Area', lat: 37.8715, lon: -122.2730 },
-    { label: 'San Rafael (North Bay)', lat: 37.9735, lon: -122.5311 }
+    { label: 'Hyderabad (T-Hub Gachibowli)', lat: 17.3850, lon: 78.4867 },
+    { label: 'Visakhapatnam (Rishikonda Tech Park)', lat: 17.7888, lon: 83.3740 },
+    { label: 'Vijayawada (Benz Circle)', lat: 16.5062, lon: 80.6480 },
+    { label: 'Tirupati (Smart Precincts)', lat: 13.6288, lon: 79.4192 },
+    { label: 'Warangal (NIT Campus coding lane)', lat: 17.9689, lon: 79.5941 }
   ];
 
   useEffect(() => {
@@ -55,6 +58,7 @@ export const VisitorPortal: React.FC<VisitorPortalProps> = ({
 
   useEffect(() => {
     loadCommunities();
+    loadNearbyEvents();
   }, [search, category, radius, userLat, userLon, refreshTrigger]);
 
   const requestRealGeolocation = () => {
@@ -70,10 +74,10 @@ export const VisitorPortal: React.FC<VisitorPortalProps> = ({
         (err) => {
           console.warn('Geolocation denied, swapping to secure Simulated Sandboxed Geolocation values.');
           setGeoMode('simulated');
-          // Use SF center coordinates
-          setUserLat(37.7749);
-          setUserLon(-122.4194);
-          setSelectedSimLocation('San Francisco, CA');
+          // Use Hyderabad coordinates
+          setUserLat(17.3850);
+          setUserLon(78.4867);
+          setSelectedSimLocation('Hyderabad, Telangana');
         },
         { timeout: 8000 }
       );
@@ -100,6 +104,26 @@ export const VisitorPortal: React.FC<VisitorPortalProps> = ({
       setErrorMsg(e.message || 'Error occurred during community synchronization.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadNearbyEvents = async () => {
+    setLoadingEvents(true);
+    try {
+      const filters: any = {};
+      if (userLat !== null && userLon !== null) {
+        filters.lat = userLat;
+        filters.lon = userLon;
+      }
+      if (radius) {
+        filters.radius = Number(radius);
+      }
+      const resp = await api.getPublicEvents(filters);
+      setNearbyEvents(resp.events || []);
+    } catch (e: any) {
+      console.error('Error syncing nearby meetups:', e);
+    } finally {
+      setLoadingEvents(false);
     }
   };
 
@@ -500,6 +524,134 @@ export const VisitorPortal: React.FC<VisitorPortalProps> = ({
           </div>
         </section>
       )}
+
+      {/* 📍 MEETUPS NEAR ME (LOCATION-BASED RECOMMENDATIONS) */}
+      <section className="mx-4 mb-10">
+        <div className="bg-gradient-to-tr from-slate-50 to-indigo-50/30 rounded-2xl border border-slate-200/80 p-6 sm:p-8 shadow-sm">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+            <div>
+              <div className="flex items-center space-x-2">
+                <span className="p-1.5 bg-indigo-100 text-indigo-700 rounded-lg inline-block">
+                  <MapPin className="w-4 h-4" />
+                </span>
+                <h3 className="text-lg font-extrabold text-slate-900 font-sans tracking-tight">Meetups Near Me</h3>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Discover technical workshops, active running meetups, and volunteer projects around <strong className="text-indigo-700">{selectedSimLocation}</strong>.
+              </p>
+            </div>
+            
+            {/* Quick Distance indicator badge info */}
+            <span className="px-3 py-1 bg-white text-slate-600 rounded-full text-[10px] font-bold shadow-sm border border-slate-150 flex items-center space-x-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-ping" />
+              <span>Location-Based Sorting Active</span>
+            </span>
+          </div>
+
+          {loadingEvents ? (
+            <div className="py-12 flex flex-col items-center justify-center">
+              <div className="w-6 h-6 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-2" />
+              <p className="text-[10px] text-slate-400 font-medium">Scanning surrounding event timelines...</p>
+            </div>
+          ) : (() => {
+            // Apply category filtering as well to provide a highly cohesive user experience
+            const filteredMeetups = nearbyEvents.filter(evt => {
+              if (category === 'All') return true;
+              // Cross correlation to community category
+              const hostComm = communities.find(c => c.id === evt.communityId);
+              if (hostComm) {
+                return hostComm.category.toLowerCase() === category.toLowerCase();
+              }
+              return (evt.eventType || '').toLowerCase().includes(category.toLowerCase()) || 
+                     (evt.title || '').toLowerCase().includes(category.toLowerCase());
+            });
+
+            if (filteredMeetups.length === 0) {
+              return (
+                <div className="bg-white/80 border border-dashed rounded-xl p-8 py-10 text-center text-xs">
+                  <Compass className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                  <p className="font-bold text-slate-700">No active meetups nearby</p>
+                  <p className="text-slate-400 mt-1 max-w-sm mx-auto">
+                    There are no scheduled meetups within this range matching "{category === 'All' ? 'any' : category}". Try editing your simulated location node or clearing distance limits!
+                  </p>
+                </div>
+              );
+            }
+
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredMeetups.map((evt) => {
+                  const evDate = new Date(evt.eventDate);
+                  const isFuture = evDate.getTime() > Date.now();
+                  return (
+                    <div 
+                      key={evt.id} 
+                      className="bg-white rounded-xl border border-slate-150 hover:border-indigo-250 p-4 shadow-sm hover:shadow-md transition-all flex flex-col justify-between"
+                    >
+                      <div>
+                        {/* Header: Date element + badge */}
+                        <div className="flex justify-between items-start gap-2 mb-3">
+                          <div className="flex items-center space-x-2">
+                            {/* Visual calendar miniature block */}
+                            <div className="bg-indigo-50 border border-indigo-150 text-indigo-700 rounded-lg p-1.5 flex flex-col items-center justify-center text-center w-11 h-11 shrink-0 font-sans">
+                              <span className="text-[9px] font-bold uppercase leading-none">
+                                {evDate.toLocaleString('default', { month: 'short' })}
+                              </span>
+                              <span className="text-sm font-black leading-none mt-0.5">
+                                {evDate.getDate()}
+                              </span>
+                            </div>
+                            
+                            <div>
+                              <p className="text-[10px] text-slate-450 uppercase tracking-wide font-bold line-clamp-1">
+                                {evt.communityName}
+                              </p>
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-100 text-slate-650 mt-0.5 leading-none">
+                                {evt.eventType || 'Gathering'}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Distance badge */}
+                          {evt.distance !== undefined && (
+                            <span className="text-[10px] font-bold font-mono text-emerald-700 bg-emerald-50 border border-emerald-150 px-1.5 py-0.5 rounded">
+                              📏 {evt.distance} km
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Event Title */}
+                        <h4 className="font-extrabold text-slate-850 text-xs sm:text-sm leading-tight hover:text-indigo-650 transition-colors line-clamp-1 mb-1">
+                          {evt.title}
+                        </h4>
+
+                        {/* Location address and city */}
+                        <p className="text-[11px] text-slate-500 font-semibold mb-1.5 line-clamp-1">
+                          📍 {evt.location}
+                        </p>
+
+                        {/* Short Description */}
+                        <p className="text-[11px] text-slate-450 line-clamp-2 leading-relaxed mb-4">
+                          {evt.description}
+                        </p>
+                      </div>
+
+                      {/* Explore community trigger */}
+                      <button
+                        onClick={() => onSelectCommunity(evt.communityId)}
+                        className="w-full text-center py-2 bg-slate-55 hover:bg-indigo-600 hover:text-white border border-slate-200 text-slate-800 text-[11px] font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center space-x-1"
+                      >
+                        <span>Details & Register RSVP</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </div>
+      </section>
 
       {/* 📊 PLATFORM GENERAL STATISTICS OR BULLETIN OVERVIEW */}
       <section className="mx-4 mb-12 bg-white rounded-2xl p-6 sm:p-8 border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-3 gap-6 text-center divide-y md:divide-y-0 md:divide-x divide-slate-100">
