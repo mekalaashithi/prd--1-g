@@ -9,7 +9,7 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  role: 'Visitor' | 'Member' | 'Community Admin';
+  role: 'Visitor' | 'Member' | 'Community Admin' | 'Super Admin' | null;
   profileImage?: string;
   location?: Location;
   interests?: string[];

@@ -82,7 +82,15 @@ export default function App() {
       const activeUser = await api.getCurrentUser();
       setUser(activeUser);
       if (activeUser) {
-        setCurrentTab('selector');
+        if (activeUser.role === 'Community Admin' || activeUser.role === 'Super Admin') {
+          setCurrentTab('admin');
+        } else if (activeUser.role === 'Member') {
+          setCurrentTab('member');
+        } else if (activeUser.role === 'Visitor') {
+          setCurrentTab('discover');
+        } else {
+          setCurrentTab('selector');
+        }
       }
     } catch (e) {
       console.warn('Session inactive or expired. Please sign in.');
@@ -109,7 +117,15 @@ export default function App() {
     setUser(loggedInUser);
     setAuthModalOpen(false);
     setRefreshTrigger((prev) => prev + 1);
-    setCurrentTab('selector');
+    if (loggedInUser.role === 'Community Admin' || loggedInUser.role === 'Super Admin') {
+      setCurrentTab('admin');
+    } else if (loggedInUser.role === 'Member') {
+      setCurrentTab('member');
+    } else if (loggedInUser.role === 'Visitor') {
+      setCurrentTab('discover');
+    } else {
+      setCurrentTab('selector');
+    }
   };
 
   // Safe login handler for Inline forms
@@ -123,8 +139,17 @@ export default function App() {
       localStorage.setItem('communityhub_token', data.token);
       setInlineSuccess('Successfully authenticated! Synchronizing workspace... 🎉');
       setTimeout(() => {
-        setUser(data.user);
-        setCurrentTab('selector');
+        const loggedInUser = data.user;
+        setUser(loggedInUser);
+        if (loggedInUser.role === 'Community Admin' || loggedInUser.role === 'Super Admin') {
+          setCurrentTab('admin');
+        } else if (loggedInUser.role === 'Member') {
+          setCurrentTab('member');
+        } else if (loggedInUser.role === 'Visitor') {
+          setCurrentTab('discover');
+        } else {
+          setCurrentTab('selector');
+        }
         setRefreshTrigger((prev) => prev + 1);
         setInlineLoading(false);
       }, 1000);
@@ -145,7 +170,7 @@ export default function App() {
       name: inlineName,
       email: inlineEmail,
       password: inlinePassword,
-      role: inlineRole,
+      role: null,
       location: {
         latitude: 17.3850,
         longitude: 78.4867,
@@ -160,8 +185,17 @@ export default function App() {
       localStorage.setItem('communityhub_token', data.token);
       setInlineSuccess('Account registered successfully! Loading selection hub... 🚀');
       setTimeout(() => {
-        setUser(data.user);
-        setCurrentTab('selector');
+        const registeredUser = data.user;
+        setUser(registeredUser);
+        if (registeredUser.role === 'Community Admin' || registeredUser.role === 'Super Admin') {
+          setCurrentTab('admin');
+        } else if (registeredUser.role === 'Member') {
+          setCurrentTab('member');
+        } else if (registeredUser.role === 'Visitor') {
+          setCurrentTab('discover');
+        } else {
+          setCurrentTab('selector');
+        }
         setRefreshTrigger((prev) => prev + 1);
         setInlineLoading(false);
       }, 1000);
@@ -186,17 +220,17 @@ export default function App() {
 
         if (newRole === 'Visitor') {
           // Switch automatically on DB store
-          await api.changeUserRole(loggedInUser.id, 'Visitor');
+          await api.updatePersistedRole('Visitor');
           const refreshed = await api.getCurrentUser();
           setUser(refreshed);
           setCurrentTab('discover');
         } else if (newRole === 'Community Admin') {
-          await api.changeUserRole(loggedInUser.id, 'Community Admin');
+          await api.updatePersistedRole('Community Admin');
           const refreshed = await api.getCurrentUser();
           setUser(refreshed);
           setCurrentTab('admin');
         } else {
-          await api.changeUserRole(loggedInUser.id, 'Member');
+          await api.updatePersistedRole('Member');
           const refreshed = await api.getCurrentUser();
           setUser(refreshed);
           setCurrentTab('member');
@@ -212,19 +246,10 @@ export default function App() {
 
     try {
       // Synchronize role change on server database
-      await api.changeUserRole(user.id, newRole);
-      // Refresh user profile states
+      await api.updatePersistedRole(newRole);
+      // Refresh user profile states and redirect
       await syncUserSession();
       setRefreshTrigger((prev) => prev + 1);
-      
-      // Auto-navigate to correct view
-      if (newRole === 'Community Admin') {
-        setCurrentTab('admin');
-      } else if (newRole === 'Member') {
-        setCurrentTab('member');
-      } else {
-        setCurrentTab('discover');
-      }
     } catch (e) {
       console.error('Failed to swap roles in Sandbox.', e);
     }
@@ -433,36 +458,6 @@ export default function App() {
                       onChange={(e) => setInlinePassword(e.target.value)}
                       className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
                     />
-
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
-                        Default Clearance Level
-                      </label>
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setInlineRole('Member')}
-                          className={`py-2 text-xs font-bold rounded-lg border transition-all ${
-                            inlineRole === 'Member'
-                              ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-xs'
-                              : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                          }`}
-                        >
-                          Member Level
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setInlineRole('Community Admin')}
-                          className={`py-2 text-xs font-bold rounded-lg border transition-all ${
-                            inlineRole === 'Community Admin'
-                              ? 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-xs'
-                              : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                          }`}
-                        >
-                          Community Admin
-                        </button>
-                      </div>
-                    </div>
                   </div>
 
                   <button
@@ -557,109 +552,12 @@ export default function App() {
         currentTab={selectedCommunityId ? 'detail' : currentTab}
         onChangeTab={(tab) => {
           setSelectedCommunityId(null);
-          if (tab === 'discover') {
-            handleRoleChangedSandbox('Visitor');
-          } else if (tab === 'member') {
-            handleRoleChangedSandbox('Member');
-          } else if (tab === 'admin') {
-            handleRoleChangedSandbox('Community Admin');
-          } else if (tab === 'selector') {
-            setCurrentTab('selector');
-          } else {
-            setCurrentTab(tab as any);
-          }
+          setCurrentTab(tab as any);
         }}
         onTriggerAuth={() => handleTriggerAuth('login')}
         onLogout={handleLogout}
         onRoleChange={handleRoleChangedSandbox}
       />
-
-      {/* 🛠️ ACTIVE PORTAL PERSPECTIVE CONTROLLER */}
-      {user && (
-        <div className="bg-white border-b border-slate-200 py-3.5 px-4 sm:px-6 lg:px-8 shadow-xs">
-          <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-center space-x-3.5">
-              <div className="w-10 h-10 bg-indigo-50 border border-indigo-100 rounded-2xl flex items-center justify-center text-indigo-600 shadow-sm shrink-0">
-                <Compass className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="flex items-center space-x-2">
-                  <h2 className="text-sm font-extrabold text-slate-900 font-sans tracking-tight">
-                    Active Portal Workspace Selector
-                  </h2>
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 animate-pulse">
-                    Live Role Sync
-                  </span>
-                </div>
-                <p className="text-xs text-slate-500 mt-0.5 leading-snug">
-                  Toggle perspective panels directly. Swapping roles grants respective options in the app.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto self-stretch sm:self-auto shrink-0">
-              
-              {/* Back to choice desk selector button */}
-              {currentTab !== 'selector' && (
-                <button
-                  onClick={() => setCurrentTab('selector')}
-                  className="py-1.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-lg transition-all flex items-center justify-center space-x-1.5 cursor-pointer border border-slate-250 shrink-0"
-                >
-                  <span>&larr; Back to Portal Choices</span>
-                </button>
-              )}
-
-              <div className="grid grid-cols-3 gap-1 bg-slate-50 p-1 rounded-xl border border-slate-200 Grow sm:grow-0">
-                {/* 🌐 VISITOR PORTAL BUTTON */}
-                <button
-                  id="portal-btn-visitor"
-                  onClick={() => handleRoleChangedSandbox('Visitor')}
-                  className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer ${
-                    currentTab === 'discover' && (user.role === 'Visitor' || !user)
-                      ? 'bg-indigo-600 text-white shadow-xs font-extrabold'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white'
-                  }`}
-                >
-                  <Compass className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Visitor Portal</span>
-                  <span className="sm:hidden">Visitor</span>
-                </button>
-
-                {/* 👥 MEMBER PORTAL BUTTON */}
-                <button
-                  id="portal-btn-member"
-                  onClick={() => handleRoleChangedSandbox('Member')}
-                  className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer ${
-                    currentTab === 'member' && user.role === 'Member'
-                      ? 'bg-indigo-600 text-white shadow-xs font-extrabold'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white'
-                  }`}
-                >
-                  <Users className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Member Space</span>
-                  <span className="sm:hidden">Member</span>
-                </button>
-
-                {/* 🛠️ ADMIN PORTAL BUTTON */}
-                <button
-                  id="portal-btn-admin"
-                  onClick={() => handleRoleChangedSandbox('Community Admin')}
-                  className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer ${
-                    currentTab === 'admin' && user.role === 'Community Admin'
-                      ? 'bg-indigo-600 text-white shadow-xs font-extrabold'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white'
-                  }`}
-                >
-                  <Shield className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Admin Desk</span>
-                  <span className="sm:hidden">Admin</span>
-                </button>
-              </div>
-
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* 🚀 WORKSPACE CONTENT CANVAS */}
       <main className="flex-grow pb-16">

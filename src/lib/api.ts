@@ -48,9 +48,20 @@ export const api = {
     return request<{ user: any }>('/auth/me');
   },
 
+  async getUsersMe() {
+    return request<any>('/users/me');
+  },
+
   async getCurrentUser() {
     const res = await this.getMe();
     return res.user;
+  },
+
+  async updatePersistedRole(role: string) {
+    return request<{ message: string; user: any }>('/users/role', {
+      method: 'PATCH',
+      body: JSON.stringify({ role }),
+    });
   },
 
   logout() {

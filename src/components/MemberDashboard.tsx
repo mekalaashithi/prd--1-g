@@ -684,6 +684,50 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
                   </div>
                 </div>
               )}
+
+              {/* Switch Role block */}
+              <div className="pt-6 border-t border-slate-100 mt-6">
+                <span className="text-slate-400 font-bold block uppercase tracking-wide text-[10px] mb-2">Workspace Portal Perspective</span>
+                <p className="text-xs text-slate-500 mb-3">Switching your persistent role updates your defaults across devices.</p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={async () => {
+                      if (window.confirm('Are you sure you want to change your role to Visitor?')) {
+                        try {
+                          await api.updatePersistedRole('Visitor');
+                          onRefreshUser();
+                        } catch (err) {
+                          console.error(err);
+                        }
+                      }
+                    }}
+                    className="px-3.5 py-2 bg-slate-100 border border-slate-200 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer transition-all"
+                  >
+                    Visitor Perspective
+                  </button>
+                  <button
+                    disabled
+                    className="px-3.5 py-2 bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold text-xs rounded-xl cursor-not-allowed"
+                  >
+                    Member Space (Current)
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (window.confirm('Are you sure you want to change your role to Community Admin?')) {
+                        try {
+                          await api.updatePersistedRole('Community Admin');
+                          onRefreshUser();
+                        } catch (err) {
+                          console.error(err);
+                        }
+                      }
+                    }}
+                    className="px-3.5 py-2 bg-slate-100 border border-slate-200 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer transition-all"
+                  >
+                    Community Admin Desk
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 

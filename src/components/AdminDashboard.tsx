@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Users, Calendar, Megaphone, Settings, TrendingUp, Check, X, ShieldAlert, Award, Star, Trash2, ArrowRight, ToggleLeft, Edit, PlusCircle, Bookmark, Eye, Layers, Clock, CheckSquare, Heart } from 'lucide-react';
+import { Plus, Users, Calendar, Megaphone, Settings, TrendingUp, Check, X, ShieldAlert, Award, Star, Trash2, ArrowRight, ToggleLeft, Edit, PlusCircle, Bookmark, Eye, Layers, Clock, CheckSquare, Heart, User } from 'lucide-react';
 import { api } from '../lib/api';
 import { LineChart, BarChart } from './Charts';
 
@@ -19,7 +19,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Admin-managed communities list
   const [managedComms, setManagedComms] = useState<any[]>([]);
   const [selectedCommId, setSelectedCommId] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'analytics' | 'requests' | 'members' | 'events' | 'announcements' | 'settings' | 'volunteers'>('analytics');
+  const [activeTab, setActiveTab] = useState<'analytics' | 'requests' | 'members' | 'events' | 'announcements' | 'settings' | 'volunteers' | 'account'>('analytics');
 
   // Sub-data inside community
   const [analytics, setAnalytics] = useState<any>(null);
@@ -516,6 +516,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   { key: 'events', label: `Events Board (${events.length})`, icon: Calendar },
                   { key: 'announcements', label: `Notice Bulletins (${announcements.length})`, icon: Megaphone },
                   { key: 'settings', label: 'Branding & Meta Settings', icon: Settings },
+                  { key: 'account', label: 'Personal Account Settings', icon: User },
                 ].map((item: any) => {
                   const active = activeTab === item.key;
                   const Icon = item.icon;
@@ -1663,6 +1664,78 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </table>
                     </div>
                   )}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'account' && (
+              <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm font-sans mb-6">
+                <div className="border-b border-slate-100 pb-4 mb-6">
+                  <h3 className="text-base font-bold text-slate-900">Personal Information Console</h3>
+                  <p className="text-xs text-slate-500">Configure your security settings and persistent role values.</p>
+                </div>
+
+                <div className="space-y-6 text-slate-700">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-4 text-xs">
+                    <div>
+                      <span className="text-slate-400 font-bold block uppercase tracking-wide text-[10px]">User Account Email</span>
+                      <span className="font-semibold text-slate-800 mt-1 block">{user?.email}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 font-bold block uppercase tracking-wide text-[10px]">Account Clearance</span>
+                      <span className="font-semibold text-indigo-700 mt-1 block tracking-wider uppercase">{user?.role}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 font-bold block uppercase tracking-wide text-[10px]">Registry Date</span>
+                      <span className="font-semibold text-slate-800 mt-1 block">
+                        {user?.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'N/A'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Switch Role block */}
+                  <div className="pt-6 border-t border-slate-100 mt-6 animate-fade-in">
+                    <span className="text-slate-400 font-bold block uppercase tracking-wide text-[10px] mb-2">Workspace Portal Perspective</span>
+                    <p className="text-xs text-slate-500 mb-3">Switching your persistent role updates your defaults across devices.</p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={async () => {
+                          if (window.confirm('Are you sure you want to change your role to Visitor?')) {
+                            try {
+                              await api.updatePersistedRole('Visitor');
+                              onRefreshUser();
+                            } catch (err) {
+                              console.error(err);
+                            }
+                          }
+                        }}
+                        className="px-3.5 py-2 bg-slate-100 border border-slate-200 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer transition-all"
+                      >
+                        Visitor Perspective
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (window.confirm('Are you sure you want to change your role to Member?')) {
+                            try {
+                              await api.updatePersistedRole('Member');
+                              onRefreshUser();
+                            } catch (err) {
+                              console.error(err);
+                            }
+                          }
+                        }}
+                        className="px-3.5 py-2 bg-slate-100 border border-slate-200 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer transition-all"
+                      >
+                        Member Space
+                      </button>
+                      <button
+                        disabled
+                        className="px-3.5 py-2 bg-pink-50 border border-pink-200 text-pink-805 font-bold text-xs rounded-xl cursor-not-allowed"
+                      >
+                        Community Admin Desk (Current)
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}

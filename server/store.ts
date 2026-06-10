@@ -15,7 +15,7 @@ export interface User {
   name: string;
   email: string;
   passwordHash: string;
-  role: 'Visitor' | 'Member' | 'Community Admin' | 'Super Admin';
+  role: 'Visitor' | 'Member' | 'Community Admin' | 'Super Admin' | null;
   profileImage?: string;
   location?: Location;
   interests?: string[];
@@ -225,8 +225,8 @@ export class DBStore {
   }
 
   // Generate unique sequential roleId
-  public generateRoleId(role: 'Visitor' | 'Member' | 'Community Admin' | 'Super Admin'): string {
-    return this.generateRoleIdForUpgrade(role, this.getUsers());
+  public generateRoleId(role: 'Visitor' | 'Member' | 'Community Admin' | 'Super Admin' | null | undefined): string {
+    return this.generateRoleIdForUpgrade(role || 'Visitor', this.getUsers());
   }
 
   private generateRoleIdForUpgrade(role: 'Visitor' | 'Member' | 'Community Admin' | 'Super Admin', usersList: User[]): string {

@@ -59,7 +59,7 @@ export function requireRole(roles: User['role'][]) {
 
 // Post /api/auth/register
 apiRouter.post('/auth/register', (req, res) => {
-  const { name, email, password, role = 'Member', location, interests = [] } = req.body;
+  const { name, email, password, role = null, location, interests = [] } = req.body;
 
   if (!name || !email || !password) {
     res.status(400).json({ error: 'Name, email, and password are required' });
@@ -163,6 +163,86 @@ apiRouter.get('/auth/me', authenticateToken, (req: AuthenticatedRequest, res) =>
   }
 
   res.json({
+    user: {
+      id: user.id,
+      roleId: user.roleId,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      profileImage: user.profileImage,
+      location: user.location,
+      interests: user.interests,
+      createdAt: user.createdAt,
+      gamification: getUserGamification(user.id)
+    }
+  });
+});
+
+// GET /api/users/me - Returns user details including persisted role
+apiRouter.get('/users/me', authenticateToken, (req: AuthenticatedRequest, res) => {
+  const users = dbStore.getUsers();
+  const user = users.find(u => u.id === req.user?.id);
+
+  if (!user) {
+    res.status(404).json({ error: 'User profiles not found' });
+    return;
+  }
+
+  res.json({
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    roleId: user.roleId,
+    profileImage: user.profileImage,
+    location: user.location,
+    interests: user.interests || [],
+    createdAt: user.createdAt
+  });
+});
+
+// PATCH /api/users/role - Saves user's role selection to database permanently
+apiRouter.patch('/users/role', authenticateToken, (req: AuthenticatedRequest, res) => {
+  const { role } = req.body;
+
+  if (!role) {
+    res.status(400).json({ error: 'Valid user role is required' });
+    return;
+  }
+
+  // Support varying casing (e.g. visitor, member, community_admin)
+  let normalizedRole: any = null;
+  const lRole = role.toLowerCase();
+  if (lRole === 'visitor') {
+    normalizedRole = 'Visitor';
+  } else if (lRole === 'member') {
+    normalizedRole = 'Member';
+  } else if (lRole === 'community_admin' || lRole === 'community admin') {
+    normalizedRole = 'Community Admin';
+  } else if (lRole === 'super_admin' || lRole === 'super admin') {
+    normalizedRole = 'Super Admin';
+  } else {
+    normalizedRole = role;
+  }
+
+  const users = dbStore.getUsers();
+  const user = users.find(u => u.id === req.user?.id);
+
+  if (!user) {
+    res.status(404).json({ error: 'User not found' });
+    return;
+  }
+
+  user.role = normalizedRole as User['role'];
+  user.roleId = dbStore.generateRoleId(user.role);
+  dbStore.flush();
+
+  res.json({
+    message: 'User role updated permanently.',
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
     user: {
       id: user.id,
       roleId: user.roleId,

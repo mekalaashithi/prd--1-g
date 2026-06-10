@@ -66,41 +66,20 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   return (
     <header className="sticky top-0 z-40 w-full bg-white border-b border-slate-200">
-      
-      {/* 🛠️ DEVELOPER SANDBOX INJECT (Super useful for reviewing or testing) */}
-      <div className="bg-slate-900 text-slate-100 px-4 py-2 text-xs flex flex-wrap items-center justify-between gap-2 shadow-inner">
-        <div className="flex items-center space-x-2">
-          <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <p className="font-medium text-slate-300">
-            <strong>SaaS Simulation Sandbox:</strong> Test permissions by swapping user roles on-the-fly!
-          </p>
-        </div>
-        <div className="flex items-center space-x-1">
-          {(['Visitor', 'Member', 'Community Admin'] as const).map((r) => {
-            const active = user?.role === r || (!user && r === 'Visitor');
-            return (
-              <button
-                key={r}
-                onClick={() => onRoleChange(r as any)}
-                className={`px-2.5 py-0.5 rounded font-sans font-semibold text-[10px] sm:text-xs transition-all pointer-events-auto cursor-pointer ${
-                  active
-                    ? 'bg-indigo-600 text-white shadow'
-                    : 'bg-slate-800 text-slate-400 hover:text-slate-100 hover:bg-slate-700'
-                }`}
-              >
-                {r === 'Visitor' ? 'Visitor' : r}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-12 flex items-center justify-between">
         
         {/* Brand Logo and Link */}
         <div className="flex items-center space-x-8">
           <button
-            onClick={() => onChangeTab('discover')}
+            onClick={() => {
+              if (user) {
+                if (user.role === 'Member') onChangeTab('member');
+                else if (user.role === 'Community Admin' || user.role === 'Super Admin') onChangeTab('admin');
+                else onChangeTab('discover');
+              } else {
+                onChangeTab('discover');
+              }
+            }}
             className="flex items-center space-x-2 bg-transparent border-0 p-0 text-slate-950 font-extrabold text-lg tracking-tight font-sans cursor-pointer outline-none"
           >
             <Compass className="w-5 h-5 text-blue-600 stroke-[2.5]" />
@@ -109,9 +88,9 @@ export const Navbar: React.FC<NavbarProps> = ({
             </span>
           </button>
 
-          {/* Navigation Links */}
+          {/* Navigation Links strictly based on role */}
           <nav className="hidden md:flex space-x-1 font-sans text-xs">
-            {user && (
+            {user && !user.role && (
               <button
                 onClick={() => onChangeTab('selector')}
                 className={`px-3 py-1.5 rounded-lg font-medium transition-all cursor-pointer ${
@@ -124,41 +103,43 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            <button
-              onClick={() => onChangeTab('discover')}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-all cursor-pointer ${
-                currentTab === 'discover' || currentTab === 'detail'
-                  ? 'bg-slate-100 text-indigo-700 font-bold' 
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-              }`}
-            >
-              Browse communities
-            </button>
+            {(!user || user.role === 'Visitor') && (
+              <button
+                onClick={() => onChangeTab('discover')}
+                className={`px-3 py-1.5 rounded-lg font-medium transition-all cursor-pointer ${
+                  currentTab === 'discover' || currentTab === 'detail'
+                    ? 'bg-slate-100 text-indigo-700 font-bold' 
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+              >
+                Browse communities
+              </button>
+            )}
 
-            {user && (
-              <>
-                <button
-                  onClick={() => onChangeTab('member')}
-                  className={`px-3 py-1.5 rounded-lg font-medium transition-all cursor-pointer ${
-                    currentTab === 'member' 
-                      ? 'bg-slate-100 text-indigo-700 font-bold' 
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                  }`}
-                >
-                  Member Space
-                </button>
+            {user && user.role === 'Member' && (
+              <button
+                onClick={() => onChangeTab('member')}
+                className={`px-3 py-1.5 rounded-lg font-medium transition-all cursor-pointer ${
+                  currentTab === 'member' 
+                    ? 'bg-slate-100 text-indigo-700 font-bold' 
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+              >
+                Member Space
+              </button>
+            )}
 
-                <button
-                  onClick={() => onChangeTab('admin')}
-                  className={`px-3 py-1.5 rounded-lg font-medium transition-all cursor-pointer ${
-                    currentTab === 'admin' 
-                      ? 'bg-slate-100 text-indigo-700 font-bold' 
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                  }`}
-                >
-                  Community Admin
-                </button>
-              </>
+            {user && (user.role === 'Community Admin' || user.role === 'Super Admin') && (
+              <button
+                onClick={() => onChangeTab('admin')}
+                className={`px-3 py-1.5 rounded-lg font-medium transition-all cursor-pointer ${
+                  currentTab === 'admin' 
+                    ? 'bg-slate-100 text-indigo-700 font-bold' 
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+              >
+                Community Admin
+              </button>
             )}
           </nav>
         </div>
@@ -248,12 +229,32 @@ export const Navbar: React.FC<NavbarProps> = ({
                     </div>
 
                     <button
-                      onClick={() => { setProfileOpen(false); onChangeTab('member'); }}
+                      onClick={() => { setProfileOpen(false); onChangeTab('selector'); }}
                       className="w-full text-left px-4 py-2 text-xs hover:bg-slate-50 flex items-center space-x-2 text-slate-700 cursor-pointer"
                     >
-                      <UserCheck className="w-4 h-4 text-indigo-500" />
-                      <span>My profile workspace</span>
+                      <RefreshCw className="w-4 h-4 text-indigo-500" />
+                      <span>Switch Portal Role</span>
                     </button>
+
+                    {user.role === 'Member' && (
+                      <button
+                        onClick={() => { setProfileOpen(false); onChangeTab('member'); }}
+                        className="w-full text-left px-4 py-2 text-xs hover:bg-slate-50 flex items-center space-x-2 text-slate-700 cursor-pointer"
+                      >
+                        <UserCheck className="w-4 h-4 text-emerald-500" />
+                        <span>My Member Workspace</span>
+                      </button>
+                    )}
+
+                    {(user.role === 'Community Admin' || user.role === 'Super Admin') && (
+                      <button
+                        onClick={() => { setProfileOpen(false); onChangeTab('admin'); }}
+                        className="w-full text-left px-4 py-2 text-xs hover:bg-slate-50 flex items-center space-x-2 text-slate-700 cursor-pointer"
+                      >
+                        <Shield className="w-4 h-4 text-pink-500" />
+                        <span>My Admin Workspace</span>
+                      </button>
+                    )}
 
                     <button
                       onClick={onLogout}
